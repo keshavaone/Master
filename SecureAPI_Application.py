@@ -23,7 +23,7 @@ logging.basicConfig(handlers=[handler], level=logging.INFO)
 class PIIWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('PII')
+        self.setWindowTitle('Guard Data')
         self.setGeometry(100, 100, 1000, 600)
         self.setStyleSheet("""
             QMainWindow {
@@ -49,7 +49,7 @@ class PIIWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
 
-        self.welcome_text = QLabel(f"Welcome to PII Application: {os.getlogin()}", central_widget)
+        self.welcome_text = QLabel(f"Welcome to GUARD: {os.environ.get('USER').upper()}", central_widget)
         self.welcome_text.setStyleSheet("font-size: 15px; font-weight: bold;")
         self.welcome_text.setVisible(False)
         layout.addWidget(self.welcome_text, alignment=Qt.AlignCenter)
@@ -71,13 +71,16 @@ class PIIWindow(QMainWindow):
 
         self.log_table = self.setTable(columncount=2,hlabels=['Timestamp', 'Action/Task Performed'])
         layout.addWidget(self.log_table)
-
+        
+        button_layout = QHBoxLayout()
         self.btnDisplayData = self.setButton('Display Data', 'Click to display data', 'Ctrl+D', self.show_data_window,style="background-color: gray; color: black;")
-        layout.addWidget(self.btnDisplayData, alignment=Qt.AlignCenter)
+        button_layout.addWidget(self.btnDisplayData)
 
         # Add a button for adding a new entry
         self.btnAddEntry = self.setButton('Add New Entry', 'Click to add a new entry', 'Ctrl+N', self.add_new_entry)
-        layout.addWidget(self.btnAddEntry, alignment=Qt.AlignCenter)
+        button_layout.addWidget(self.btnAddEntry)
+        button_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addLayout(button_layout)
     
     def setButton(self,btnName,tooltip,shortcut,connect,visibleTrue=False,style="background-color: green; color: white;"):
         btn = QPushButton(btnName, self)
@@ -126,8 +129,8 @@ class PIIWindow(QMainWindow):
         main_layout.addWidget(type_label)
         main_layout.addWidget(type_input)
     
-        # PII section
-        pii_label = QLabel("PII:", dialog)
+        # Your Guard section
+        pii_label = QLabel("Your Guard:", dialog)
         main_layout.addWidget(pii_label)
     
         pii_layout = QVBoxLayout()
@@ -169,10 +172,10 @@ class PIIWindow(QMainWindow):
             pii_layout.removeItem(item_layout)
             pii_items.remove((item_name_input, item_data_input))
     
-        # Add default PII item
+        # Add default Guard Data item
         add_pii_item()
     
-        # Button to add new PII items
+        # Button to add new Guard Data items
         add_button = QPushButton("+", dialog)
         add_button.setFixedSize(35, 30)
         
@@ -218,7 +221,7 @@ class PIIWindow(QMainWindow):
                 name = name_input.text().strip()
                 data = data_input.text().strip()
                 if not name or not data:
-                    error_messages.append(f"PII Item {i+1} requires both 'Item Name' and 'Data'.")
+                    error_messages.append(f"Guard's Item {i+1} requires both 'Item Name' and 'Data'.")
     
             if error_messages:
                 QMessageBox.warning(dialog, "Validation Errors", "\n".join(error_messages))
@@ -279,11 +282,11 @@ class PIIWindow(QMainWindow):
             QMessageBox.warning(self, "Invalid Input", "Please check the Error Below.\n\n"+str(e))
 
     def download_pii(self):
-        self.update_log(self.assistant.get_current_time(), "PII Data Download Attempted")
+        self.update_log(self.assistant.get_current_time(), "Guard Data Download Attempted")
         pre_download_time_stamp = time.time()
         response = self.agent.download_excel()
-        self.update_log(self.assistant.get_current_time(), f"PII Data Download Time: {time.time() - pre_download_time_stamp:.2f} Seconds")
-        self.update_log(self.assistant.get_current_time(), "PII Data Download Function Response: " + str(response))
+        self.update_log(self.assistant.get_current_time(), f"Guard Data Download Time: {time.time() - pre_download_time_stamp:.2f} Seconds")
+        self.update_log(self.assistant.get_current_time(), "Guard Data Download Function Response: " + str(response))
         if response:
             QMessageBox.information(self, "Download Complete", "Data downloaded and decrypted successfully!")
         else:
@@ -302,7 +305,7 @@ class PIIWindow(QMainWindow):
         try:
             # Secure the window by disabling certain features
             data_window = QMainWindow(self)
-            data_window.setWindowTitle("PII Data")
+            data_window.setWindowTitle("Your Guard Data")
             data_window.setWindowFlags(Qt.Window | Qt.CustomizeWindowHint | Qt.WindowTitleHint | Qt.WindowCloseButtonHint | Qt.WindowMinimizeButtonHint)
     
             central_widget = QWidget(data_window)
@@ -319,7 +322,7 @@ class PIIWindow(QMainWindow):
                   # Ensure response is a valid JSON string
                 response = response.json()
                 data_frame = pd.DataFrame(response)
-                self.update_log(self.assistant.get_current_time(), 'PII Data Displaying...')
+                self.update_log(self.assistant.get_current_time(), 'Guard Data Displaying...')
             
             except (subprocess.CalledProcessError, ValueError) as e:
                 self.update_log(self.assistant.get_current_time(), f'Error: {str(e)}')
@@ -389,7 +392,7 @@ class PIIWindow(QMainWindow):
             def on_close_event(event):
                 event.accept()
                 close_event_strt_time = time.time()
-                self.update_log(self.assistant.get_current_time(), f'Application PII Window Closed')
+                self.update_log(self.assistant.get_current_time(), f'Guard Window Closed')
                 if self.modified:
                     self.update_log(self.assistant.get_current_time(), f'Data Backup Initiated...')
                     self.agent.upload_securely()
@@ -400,7 +403,7 @@ class PIIWindow(QMainWindow):
                     self.populate_data_table(data)
                     self.update_log(self.assistant.get_current_time(), f'Data Backed Up in {time.time() - close_event_strt_time:.2f} Seconds')
                 close_event_time = close_event_strt_time - self.pii_table_strt_time
-                self.update_log(self.assistant.get_current_time(), f'Application PII Window Closed after {close_event_time:.2f} Seconds')
+                self.update_log(self.assistant.get_current_time(), f'Guard Window Closed after {close_event_time:.2f} Seconds')
     
             data_window.closeEvent = on_close_event
     
@@ -446,7 +449,7 @@ class PIIWindow(QMainWindow):
     
         # Create and set up the dialog
         dialog = QDialog(self)
-        dialog.setWindowTitle("Edit PII")
+        dialog.setWindowTitle("Edit Guard Data")
         layout = QVBoxLayout()
     
         # Add + button to add new Item Name and Data at the top right
@@ -554,7 +557,7 @@ class PIIWindow(QMainWindow):
                     response = response.json()
                     self.update_log(self.assistant.get_current_time(), f"Update Time: {time.time() - self.time_updt_strt_time:.2f} Seconds")
                     self.update_log(self.assistant.get_current_time(), f"Update Function Response: {response}")
-                    self.update_log(self.assistant.get_current_time(), f"Modified: {final_item['Category']}'s {final_item['Type']} - PII")
+                    self.update_log(self.assistant.get_current_time(), f"Modified: {final_item['Category']}'s {final_item['Type']} - Guard Data")
                     self.modified = True
                     QMessageBox.information(self, "Update Successful", "Data updated successfully!")
                 else:
@@ -767,7 +770,6 @@ class PIIWindow(QMainWindow):
         logging.info(f"{task_time} - {task_name}")
 
     def populate_data_table(self, data):
-        
         data = data['Category'].unique()
         self.data_table.setRowCount(len(data))
         for row, item in enumerate(data):
@@ -839,7 +841,6 @@ class PIIWindow(QMainWindow):
             else:
                 QMessageBox.warning(self, "Delete Error", "Failed to delete the item.")
                 self.update_log(self.assistant.get_current_time(), "Failed to delete the item.")
-
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
