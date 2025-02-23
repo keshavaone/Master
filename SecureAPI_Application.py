@@ -322,6 +322,7 @@ class PIIWindow(QMainWindow):
                   # Ensure response is a valid JSON string
                 response = response.json()
                 data_frame = pd.DataFrame(response)
+                self.columns = data_frame.columns
                 self.update_log(self.assistant.get_current_time(), 'Guard Data Displaying...')
             
             except (subprocess.CalledProcessError, ValueError) as e:
@@ -344,7 +345,7 @@ class PIIWindow(QMainWindow):
                 for row in range(num_rows):
                     for col in range(num_columns):
                         value = data_frame.iat[row, col]
-    
+                        
                         # Check if the column is 'PII' and contains a list of dictionaries
                         if data_frame.columns[col] == 'PII' and isinstance(value, str):
                             try:
@@ -366,7 +367,7 @@ class PIIWindow(QMainWindow):
     
                 self.table_widget.setContextMenuPolicy(Qt.CustomContextMenu)
                 self.table_widget.customContextMenuRequested.connect(self.open_context_menu)
-    
+
             btnDownload = QPushButton('Download Data', data_window)
             btnDownload.setCursor(QCursor(Qt.PointingHandCursor))
             btnDownload.setIcon(QIcon('download.png'))
@@ -469,15 +470,6 @@ class PIIWindow(QMainWindow):
             layout.insertLayout(layout.count() - 1, hbox)
             edits.append((item_name_edit, data_edit))
     
-        # top_layout = QHBoxLayout()
-        # top_layout.addStretch()  # Pushes the button to the right
-        # add_button = QPushButton("+")
-        # add_button.setFixedSize(20,20)
-        # add_button.clicked.connect(add_new_item_data)
-        # top_layout.addWidget(add_button)
-        # layout.addLayout(top_layout)
-        
-    
         # Process old_value into multiple item name-data pairs
         list_of_pairs = []
         for pair in old_value.split('\n'):
@@ -535,24 +527,15 @@ class PIIWindow(QMainWindow):
             final_value = json.dumps(final_value_list)
     
             final_item = {}
-    
-            row = selected_items[0].row()
-            column = selected_items[0].column()
-            final_item["Category"] = self.table_widget.item(row, column).text()
-    
-            row = selected_items[1].row()
-            column = selected_items[1].column()
-            final_item["Type"] = self.table_widget.item(row, column).text()
+            for i in selected_items:
+                row = i.row()
+                column = i.column()
+                final_item[self.columns[column]] = self.table_widget.item(row, column).text()
             
-            final_item["PII"] = final_value
-            update_data = {
-                'Category':final_item['Category'],
-                'PII':final_item['PII'].replace('"', "\'"),
-                'Type':final_item['Type']
-            }
+            final_item["PII"] = final_value.replace('"', "\'")
             self.time_updt_strt_time = time.time()
             try:
-                response = requests.patch(CONSTANTS.URL,json=update_data)
+                response = requests.patch(CONSTANTS.URL,json=final_item)
                 if response.status_code == 200:
                     response = response.json()
                     self.update_log(self.assistant.get_current_time(), f"Update Time: {time.time() - self.time_updt_strt_time:.2f} Seconds")
@@ -755,8 +738,12 @@ class PIIWindow(QMainWindow):
         data["Button"].setText("Copied")
         data["Button"].setStyleSheet("background-color: green; color: white; font-weight: bold;")
         self.update_log(self.assistant.get_current_time(), f"Copied {self.option}'s {data['Item Name']} to Clipboard.")
-        # QMessageBox.information(self, "Copied", f"{data['Item Name']} Copied to Clipboard.")
-
+        QTimer.singleShot(3000, lambda: self.reset_button_text(data))
+    
+    def reset_button_text(self, data):
+        data["Button"].setText("Copy")
+        data["Button"].setStyleSheet("background-color: White; color: Black;")
+        
     def update_log(self, task_time, task_name):
         row_position = self.log_table.rowCount()
         self.log_table.insertRow(row_position)
@@ -846,3 +833,4 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
     window = PIIWindow()
     sys.exit(app.exec_())
+    

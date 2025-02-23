@@ -3,11 +3,13 @@ from dataclasses import dataclass,field
 import base64,os,io,time,time
 import pandas as pd
 import atexit
+from StoreSecrets import get_secret
 import ast
 import CONSTANTS
 from KMS import KMS
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
+from bson.objectid import ObjectId
 
 @dataclass(eq=False, repr=False, order=False)
 class Agent:
@@ -21,22 +23,23 @@ class Agent:
         self.data_path:str = self.file_name
         
         self.status = {'Waking Up Mr.Agent...'}
-        client = MongoClient('mongodb://localhost:27017/',server_api=ServerApi('1'))
+        self.__secret = ast.literal_eval(get_secret())
+        print('Secrets Fetched')
+        
+        dynamodb = boto3.resource('dynamodb', region_name="us-east-1")  # Change region if needed
 
-        # Access the database (MyPII) and collection (PIIData)
-        db = client['MyPII']
-        self.collection = db['PIIData']
+        # Define the table
+        table_name = "myPII"
+        self.collection = dynamodb.Table(table_name)
         self.__df = self.refresh_data()
         self.fetch_my_key()
         os.chdir(os.path.dirname(os.path.realpath(__file__)))
         self.data_path:str = self.file_name
-        aws_key = os.getenv('AWS_KEY')
-        # assert aws_key != None
         atexit.register(self.end_work)
    
 
     def fetch_my_key(self):
-       self.__encoded_key = self.filter_from_db('KeyID')
+       self.__encoded_key = self.__secret['KMS_KEY_ID']
        assert self.__encoded_key is not None
        self.kms_client = KMS()
        self.cipher_suite = self.kms_client.decrypt_my_key(self.__encoded_key)
@@ -98,14 +101,12 @@ class Agent:
             return None
     
     def refresh_data(self):
-        return pd.DataFrame(self.collection.find())
+        return pd.DataFrame(self.collection.scan()['Items'])
     
      
     def get_all_data(self):
         df = self.refresh_data()
         self.__df = df.copy()
-        if '_id' in df:
-            df.drop('_id',axis=1,inplace=True)
         for i in df.index:
             if df.loc[i, 'Type'] == 'KeyID':
                 pass
@@ -121,18 +122,40 @@ class Agent:
         return return_item['PII']
 
     def insert_new_data(self,item):
+        print(item)
         try:
-            response = self.collection.insert_one({'Category':item['Category'], 'Type':item['Type'], 'PII': base64.b64encode(self.cipher_suite.encrypt(item['PII'].encode('utf-8'))).decode('utf-8')})
-            return response.acknowledged
+            item = {
+                '_id':str(ObjectId()),
+                'Category':item['Category'], 
+                'Type':item['Type'], 
+                'PII': base64.b64encode(self.cipher_suite.encrypt(item['PII'].encode('utf-8'))).decode('utf-8')
+                }
+            print(item)
+            response = self.collection.put_item(Item=item)
+            print(response)
+            return response['ResponseMetadata']['HTTPStatusCode'] == 200
         except Exception as e:
             print(e)
             return e
-    def update_one_data(self,item):
-        response = self.collection.update_one({'Category':item['Category'], 'Type':item['Type']}, {'$set': {'PII': base64.b64encode(self.cipher_suite.encrypt(item['PII'].encode('utf-8'))).decode('utf-8')}})
-        return response.acknowledged
+    
+    def update_one_data(self, item):
+        print(item)
+        updated_values = {"PII": base64.b64encode(self.cipher_suite.encrypt(item['PII'].encode('utf-8'))).decode('utf-8')}
+        print(item)
+        item_id = item['_id']
+        update_expression = "SET " + ", ".join(f"{k} = :{k}" for k in updated_values.keys())
+        expression_values = {f":{k}": v for k, v in updated_values.items()}
+
+        response = self.collection.update_item(
+            Key={"_id": item_id},
+            UpdateExpression=update_expression,
+            ExpressionAttributeValues=expression_values,
+            ReturnValues="UPDATED_NEW"
+        )
+        return response
     
     def delete_one_data(self,item):
-        response = self.collection.delete_one({'Category':item['Category'], 'Type':item['Type']})
+        response = self.collection.delete_item(Key={'_id':item['_id']})
         return response.acknowledged
 
     def download_excel(self):
