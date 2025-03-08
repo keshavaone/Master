@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, status, Request, Depends
 import uvicorn
-from Backend import Agent
-import CONSTANTS  # type: ignore
+from API.Backend import Agent
+import API.CONSTANTS as CONSTANTS  # type: ignore
 from pydantic import ValidationError
 from typing import Dict, Any
 from collections import Counter

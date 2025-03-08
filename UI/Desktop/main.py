@@ -4,9 +4,9 @@ from PyQt5.QtCore import *
 import sys, os, time, ast, logging, hashlib, subprocess,json
 import pandas as pd
 import requests
-from Backend import Agent
-from Assistant import Assistant
-import CONSTANTS
+from API.Backend import Agent
+from API.Assistant import Assistant
+import API.CONSTANTS as CONSTANTS
 from PyQt5 import QtCore
 from PyQt5.QtWidgets import QInputDialog
 import hashlib

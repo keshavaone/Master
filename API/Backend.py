@@ -3,10 +3,10 @@ from dataclasses import dataclass,field
 import base64,os,io,time,time
 import pandas as pd
 import atexit
-from StoreSecrets import get_secret
+from API.StoreSecrets import get_secret
 import ast
-import CONSTANTS
-from KMS import KMS
+import API.CONSTANTS as CONSTANTS
+from API.KMS import KMS
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
 from bson.objectid import ObjectId

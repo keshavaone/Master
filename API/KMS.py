@@ -3,7 +3,7 @@ import os
 from dataclasses import dataclass
 import base64
 import pandas as pd
-import CONSTANTS
+import API.CONSTANTS as CONSTANTS
 from cryptography.fernet import Fernet
 
 
