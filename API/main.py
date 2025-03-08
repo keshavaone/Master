@@ -39,11 +39,11 @@ logging.basicConfig(handlers=[handler], level=logging.INFO)
 async def count_api_calls(request: Request, call_next):
     """
     Middleware to count and log API calls.
-    
+
     Args:
         request: The incoming request
         call_next: The next middleware or route handler
-        
+
     Returns:
         Response from the next handler
     """
@@ -60,14 +60,14 @@ async def count_api_calls(request: Request, call_next):
 def process_data(item, operation):
     """
     Process data operations for PII data.
-    
+
     Args:
         item: The data item to process
         operation: The operation to perform (insert, update, delete, get)
-        
+
     Returns:
         dict: Response data
-        
+
     Raises:
         HTTPException: If validation fails or operation is invalid
     """

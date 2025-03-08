@@ -7,7 +7,7 @@ import datetime
 class Assistant:
     """
     Assistant class for handling logs and user sessions.
-    
+
     Attributes:
         s3 (str): S3 bucket name for storing logs
     """
@@ -16,7 +16,7 @@ class Assistant:
     def get_current_time(self):
         """
         Get the current formatted time.
-        
+
         Returns:
             str: Current time in format YYYY-MM-DD HH:MM:SS
         """
@@ -25,7 +25,7 @@ class Assistant:
     def collect_logs(self):
         """
         Upload application logs to S3 bucket.
-        
+
         Returns:
             bool: True if logs uploaded successfully, False otherwise
         """
@@ -33,7 +33,8 @@ class Assistant:
         log_date = datetime.datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
         try:
             with open('application.log', 'rb') as f:
-                s3.upload_fileobj(f, self.s3, f'logs/application_{log_date}.log')
+                s3.upload_fileobj(
+                    f, self.s3, f'logs/application_{log_date}.log')
                 # os.remove('application.log')
                 return True
         except Exception as e:
@@ -43,7 +44,7 @@ class Assistant:
     def logout(self):
         """
         Perform logout operations.
-        
+
         Returns:
             bool: True if logout was successful
         """

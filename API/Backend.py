@@ -19,7 +19,7 @@ from bson.objectid import ObjectId
 class Agent:
     """
     Agent class for handling secure data operations and encryption.
-    
+
     Attributes:
         s3 (str): S3 bucket name for storage
         file_name (str): File name for data storage
@@ -30,7 +30,7 @@ class Agent:
     file_name: str
     input_path: str = 'ReQuest.txt'
     stored_file_names: list[str] = field(default_factory=list)
-    
+
     def __post_init__(self):
         """Initialize the Agent with necessary resources and connections."""
         # Change to the current directory
@@ -48,7 +48,7 @@ class Agent:
             self.collection = dynamodb.Table(table_name)
             self.__df = self.refresh_data()
             self.fetch_my_key()
-            
+
             # Register cleanup handler
             atexit.register(self.end_work)
             self.chosen_one = None  # Initialize chosen_one attribute
@@ -59,7 +59,7 @@ class Agent:
     def fetch_my_key(self):
         """
         Fetch and decrypt the KMS key.
-        
+
         Raises:
             AssertionError: If KMS key is not found
         """
@@ -67,7 +67,8 @@ class Agent:
             self.__encoded_key = self.__secret['KMS_KEY_ID']
             assert self.__encoded_key is not None, "KMS key not found in secrets"
             self.kms_client = KMS()
-            self.cipher_suite = self.kms_client.decrypt_my_key(self.__encoded_key)
+            self.cipher_suite = self.kms_client.decrypt_my_key(
+                self.__encoded_key)
         except Exception as e:
             print(f"Error fetching key: {e}")
             raise
@@ -75,11 +76,11 @@ class Agent:
     def filter_from_db(self, item_name=None, download_request=False):
         """
         Filter data from the database.
-        
+
         Args:
             item_name (str, optional): Name of the item to filter
             download_request (bool, optional): Flag for download requests
-            
+
         Returns:
             bytes or int: Filtered data or 0 for download requests
         """
@@ -100,7 +101,7 @@ class Agent:
     def process_request(self):
         """
         Process an input request.
-        
+
         Returns:
             Various: The processed output based on the request type
         """
@@ -124,13 +125,13 @@ class Agent:
     def read_excel_from_file(self, file_path):
         """
         Read Excel data from a file.
-        
+
         Args:
             file_path (str): Path to the Excel file
-            
+
         Returns:
             DataFrame: The Excel data
-            
+
         Raises:
             FileNotFoundError: If the file is not found
         """
@@ -142,11 +143,11 @@ class Agent:
     def read_excel_from_s3(self, bucket_name, object_key):
         """
         Read Excel data from an S3 bucket.
-        
+
         Args:
             bucket_name (str): S3 bucket name
             object_key (str): Object key in the bucket
-            
+
         Returns:
             DataFrame or None: The Excel data or None if error
         """
@@ -163,7 +164,7 @@ class Agent:
     def refresh_data(self):
         """
         Refresh data from the database.
-        
+
         Returns:
             DataFrame: The refreshed data
         """
@@ -172,7 +173,7 @@ class Agent:
     def get_all_data(self):
         """
         Get all data with decryption.
-        
+
         Returns:
             DataFrame: All decrypted data
         """
@@ -192,7 +193,7 @@ class Agent:
     def get_one_data(self):
         """
         Get a specific data item.
-        
+
         Returns:
             str: The data item
         """
@@ -203,10 +204,10 @@ class Agent:
     def insert_new_data(self, item):
         """
         Insert new data with encryption.
-        
+
         Args:
             item (dict): Data to insert
-            
+
         Returns:
             bool or Exception: True if successful, Exception if error
         """
@@ -229,10 +230,10 @@ class Agent:
     def update_one_data(self, item):
         """
         Update existing data.
-        
+
         Args:
             item (dict): Data to update
-            
+
         Returns:
             dict: Update response
         """
@@ -256,10 +257,10 @@ class Agent:
     def delete_one_data(self, item):
         """
         Delete data item.
-        
+
         Args:
             item (dict): Item to delete
-            
+
         Returns:
             bool: True if deletion successful
         """
@@ -269,7 +270,7 @@ class Agent:
     def download_excel(self):
         """
         Download data to Excel.
-        
+
         Returns:
             bool: True if successful
         """
@@ -281,7 +282,7 @@ class Agent:
     def get_options_to_choose(self):
         """
         Get category options.
-        
+
         Returns:
             list: List of unique categories
         """
@@ -291,10 +292,10 @@ class Agent:
     def get_sub_options_to_choose(self, category):
         """
         Get sub-options for a category.
-        
+
         Args:
             category (str): Category to get sub-options for
-            
+
         Returns:
             list: List of unique types for the category
         """
@@ -306,10 +307,10 @@ class Agent:
     def get_final_output(self, type):
         """
         Get final output for a specific type.
-        
+
         Args:
             type (str): Type to get output for
-            
+
         Returns:
             Various: The parsed output
         """
@@ -327,7 +328,7 @@ class Agent:
     def perform_specific_output(self):
         """
         Perform specific output based on user input.
-        
+
         This is a CLI function for debug/testing purposes.
         """
         # Fetch all data
@@ -373,10 +374,10 @@ class Agent:
     def isBase64(sb):
         """
         Check if a string is base64 encoded.
-        
+
         Args:
             sb (str or bytes): String to check
-            
+
         Returns:
             bool: True if base64 encoded
         """
@@ -395,12 +396,12 @@ class Agent:
     def process_file(self, mode, data=None, file_path=None):
         """
         Process file operations.
-        
+
         Args:
             mode (str): File mode (r/w)
             data (str, optional): Data to write
             file_path (str, optional): Path to file
-            
+
         Returns:
             str or bool: File contents or success status
         """
@@ -422,7 +423,7 @@ class Agent:
     def upload_securely(self):
         """
         Upload data securely to S3.
-        
+
         Returns:
             bool: True if successful
         """
@@ -449,10 +450,10 @@ class Agent:
     def decrypt_data(self, data):
         """
         Decrypt data using KMS.
-        
+
         Args:
             data (bytes): Data to decrypt
-            
+
         Returns:
             str: Decrypted data
         """

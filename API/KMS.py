@@ -11,6 +11,7 @@ class KMS:
     """
     Key Management Service class for encryption/decryption operations.
     """
+
     def __init__(self):
         """Initialize the KMS client and set up paths."""
         os.chdir(os.path.dirname(os.path.realpath(__file__)))
@@ -21,13 +22,13 @@ class KMS:
     def decrypt_my_key(self, key):
         """
         Decrypt a KMS key for use with Fernet encryption.
-        
+
         Args:
             key: The encrypted KMS key (string or bytes)
-            
+
         Returns:
             Fernet: Initialized cipher suite
-            
+
         Raises:
             ValueError: If decryption fails
         """
@@ -57,13 +58,13 @@ class KMS:
     def generate_secure_key(self, key_spec):
         """
         Generate a new data key using AWS KMS.
-        
+
         Args:
             key_spec (str): Key specification (e.g., 'AES_256')
-            
+
         Returns:
             dict: AWS KMS response containing key data
-            
+
         Raises:
             AssertionError: If AWS_KEY environment variable is not set
         """
@@ -79,7 +80,7 @@ class KMS:
     def create_new_key(self):
         """
         Create a new encryption key and initialize the cipher suite.
-        
+
         Returns:
             Fernet: Initialized cipher suite
         """
@@ -97,16 +98,17 @@ class KMS:
     def decrypt_data(self, item):
         """
         Decrypt data using the initialized cipher suite.
-        
+
         Args:
             item (bytes): Encrypted data
-            
+
         Returns:
             str: Decrypted data as UTF-8 string
-            
+
         Raises:
             AttributeError: If cipher_suite is not initialized
         """
         if self.cipher_suite is None:
-            raise AttributeError("Cipher suite not initialized. Call decrypt_my_key first.")
+            raise AttributeError(
+                "Cipher suite not initialized. Call decrypt_my_key first.")
         return self.cipher_suite.decrypt(item).decode('utf-8')
