@@ -1,6 +1,17 @@
-from API.backend import Agent
-from API.assistant import Assistant
-import API.CONSTANTS as CONSTANTS
+# Standard library imports
+import sys
+import os
+import time
+import ast
+import json
+import logging
+import hashlib
+import subprocess
+from logging.handlers import RotatingFileHandler
+
+# Third-party imports
+import pandas as pd
+import requests
 from PyQt5.QtWidgets import (QLineEdit, QMessageBox, QInputDialog,
                              QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QTableWidget, QHeaderView,
@@ -8,17 +19,11 @@ from PyQt5.QtWidgets import (QLineEdit, QMessageBox, QInputDialog,
                              QAbstractItemView, QApplication, QMenu, QAction)
 from PyQt5.QtGui import QIcon, QCursor, QGuiApplication
 from PyQt5.QtCore import Qt, QTimer
-from logging.handlers import RotatingFileHandler
-import sys
-import os
-import time
-import ast
-import logging
-import hashlib
-import subprocess
-import json
-import pandas as pd
-import requests
+
+# Local application imports
+from API.backend import Agent
+from API.assistant import Assistant
+import API.CONSTANTS as CONSTANTS
 
 # Setup logging with rotation
 handler = RotatingFileHandler(
@@ -51,7 +56,7 @@ class PIIWindow(QMainWindow):
                 border-radius: 5px;
             }
         """)
-        self.UIComponents()
+        self.ui_components()
         self.show()
         self.showMaximized()
         self.modified = False
@@ -59,11 +64,11 @@ class PIIWindow(QMainWindow):
         self.assistant = None  # Initialize assistant attribute
         self.option = None  # Initialize option attribute
         self.columns = None  # Initialize columns attribute
-        self.btnLogOut = None  # Initialize logout button
+        self.btn_logout = None  # Initialize logout button
         # Connect the close event to the cleanup function
         self.closeEvent = self.cleanup_on_exit
 
-    def UIComponents(self):
+    def ui_components(self):
         """Initialize and set up the UI components."""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -75,9 +80,9 @@ class PIIWindow(QMainWindow):
         self.welcome_text.setVisible(False)
         layout.addWidget(self.welcome_text, alignment=Qt.AlignCenter)
 
-        self.btnConnectServer = self.setButton(
-            'Connect to Server', 'Click to connect to server', 'Ctrl+Q', self.show_password_input, visibleTrue=True)
-        layout.addWidget(self.btnConnectServer, alignment=Qt.AlignCenter)
+        self.btn_connect_server = self.set_button(
+            'Connect to Server', 'Click to connect to server', 'Ctrl+Q', self.show_password_input, visible_true=True)
+        layout.addWidget(self.btn_connect_server, alignment=Qt.AlignCenter)
 
         self.password_input = QLineEdit(self)
         self.password_input.setEchoMode(QLineEdit.Password)
@@ -86,53 +91,53 @@ class PIIWindow(QMainWindow):
         self.password_input.setHidden(True)
         layout.addWidget(self.password_input)
 
-        self.data_table = self.setTable(columncount=1, hlabels=['Item Name'])
+        self.data_table = self.set_table(columncount=1, hlabels=['Item Name'])
         self.data_table.itemSelectionChanged.connect(
             self.on_data_table_selection)
         layout.addWidget(self.data_table)
 
-        self.log_table = self.setTable(columncount=2, hlabels=[
+        self.log_table = self.set_table(columncount=2, hlabels=[
                                        'Timestamp', 'Action/Task Performed'])
         layout.addWidget(self.log_table)
 
         button_layout = QHBoxLayout()
-        self.btnDisplayData = self.setButton('Display Data', 'Click to display data',
+        self.btn_display_data = self.set_button('Display Data', 'Click to display data',
                                              'Ctrl+D', self.show_data_window, style="background-color: gray; color: black;")
-        button_layout.addWidget(self.btnDisplayData)
+        button_layout.addWidget(self.btn_display_data)
 
         # Add a button for adding a new entry
-        self.btnAddEntry = self.setButton(
+        self.btn_add_entry = self.set_button(
             'Add New Entry', 'Click to add a new entry', 'Ctrl+N', self.add_new_entry)
-        button_layout.addWidget(self.btnAddEntry)
+        button_layout.addWidget(self.btn_add_entry)
         button_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addLayout(button_layout)
 
-    def setButton(self, btnName, tooltip, shortcut, connect, visibleTrue=False, style="background-color: green; color: white;"):
+    def set_button(self, btn_name, tooltip, shortcut, connect, visible_true=False, style="background-color: green; color: white;"):
         """
         Create and configure a button.
 
         Args:
-            btnName (str): Name of the button
+            btn_name (str): Name of the button
             tooltip (str): Tooltip text
             shortcut (str): Keyboard shortcut
             connect (function): Function to connect to
-            visibleTrue (bool): Initial visibility
+            visible_true (bool): Initial visibility
             style (str): CSS style
 
         Returns:
             QPushButton: The configured button
         """
-        btn = QPushButton(btnName, self)
-        btn.setVisible(visibleTrue)
+        btn = QPushButton(btn_name, self)
+        btn.setVisible(visible_true)
         btn.setToolTip(tooltip)
         btn.setCursor(QCursor(Qt.PointingHandCursor))
-        btn.setIcon(QIcon(f'{btnName.lower()}.png'))
+        btn.setIcon(QIcon(f'{btn_name.lower()}.png'))
         btn.setStyleSheet(style)
         btn.setShortcut(shortcut)
         btn.clicked.connect(connect)
         return btn
 
-    def setTable(self, columncount, hlabels):
+    def set_table(self, columncount, hlabels):
         """
         Create and configure a table widget.
 
@@ -157,13 +162,13 @@ class PIIWindow(QMainWindow):
         if self.assistant:
             self.update_log(self.assistant.get_current_time(),
                             'Logging Out...')
-            self.UIComponents()
+            self.ui_components()
             self.update_log(self.assistant.get_current_time(),
                             'Logged Out Successfully.')
             self.cleanup_on_exit()
             self.modified = False
-            if self.btnLogOut:
-                self.btnLogOut.setVisible(False)
+            if self.btn_logout:
+                self.btn_logout.setVisible(False)
             self.assistant.logout()
             self.agent = None
         else:
@@ -382,14 +387,14 @@ class PIIWindow(QMainWindow):
 
     def show_password_input(self):
         """Show password input for authentication."""
-        self.btnConnectServer.setText('Authenticating...')
-        self.btnConnectServer.setDisabled(True)
-        self.btnConnectServer.setStyleSheet(
+        self.btn_connect_server.setText('Authenticating...')
+        self.btn_connect_server.setDisabled(True)
+        self.btn_connect_server.setStyleSheet(
             "background-color: gray; color: white;")
         self.password_input.setHidden(False)  # Make the password input visible
         self.password_input.setFocus()
-        self.btnConnectServer.clicked.disconnect(self.show_password_input)
-        self.btnConnectServer.clicked.connect(self.authenticate_and_connect)
+        self.btn_connect_server.clicked.disconnect(self.show_password_input)
+        self.btn_connect_server.clicked.connect(self.authenticate_and_connect)
 
     def show_data_window(self):
         """Show window with data table."""
@@ -473,11 +478,11 @@ class PIIWindow(QMainWindow):
                 self.table_widget.customContextMenuRequested.connect(
                     self.open_context_menu)
 
-            btnDownload = QPushButton('Download Data', data_window)
-            btnDownload.setCursor(QCursor(Qt.PointingHandCursor))
-            btnDownload.setIcon(QIcon('download.png'))
-            btnDownload.clicked.connect(self.download_pii)
-            layout.addWidget(btnDownload)
+            btn_download = QPushButton('Download Data', data_window)
+            btn_download.setCursor(QCursor(Qt.PointingHandCursor))
+            btn_download.setIcon(QIcon('download.png'))
+            btn_download.clicked.connect(self.download_pii)
+            layout.addWidget(btn_download)
 
             self.table_widget.resizeColumnsToContents()
             self.table_widget.resizeRowsToContents()
@@ -494,23 +499,23 @@ class PIIWindow(QMainWindow):
             self.table_widget.setStyleSheet(
                 "QTableWidget::item { padding: 5px; }")
 
-            self.pii_table_strt_time = time.time()
+            self.pii_table_start_time = time.time()
             data_window.showMaximized()
             data_window.show()
 
             def on_close_event(event):
                 """Handle data window close event."""
                 event.accept()
-                close_event_strt_time = time.time()
+                close_event_start_time = time.time()
                 self.update_log(self.assistant.get_current_time(),
-                                f'Guard Window Closed')
+                                'Guard Window Closed')
                 if self.modified:
                     self.update_log(
-                        self.assistant.get_current_time(), f'Data Backup Initiated...')
+                        self.assistant.get_current_time(), 'Data Backup Initiated...')
                     # Use updated method signature without parameters
                     self.agent.upload_securely()
                     self.update_log(
-                        self.assistant.get_current_time(), f'Refreshing Data...')
+                        self.assistant.get_current_time(), 'Refreshing Data...')
                     refresh_time = time.time()
                     data = self.process_request()
                     if data is not None:
@@ -518,8 +523,8 @@ class PIIWindow(QMainWindow):
                         ), f'Data Refreshed in {time.time() - refresh_time:.2f} Seconds')
                         self.populate_data_table(data)
                         self.update_log(self.assistant.get_current_time(
-                        ), f'Data Backed Up in {time.time() - close_event_strt_time:.2f} Seconds')
-                close_event_time = close_event_strt_time - self.pii_table_strt_time
+                        ), f'Data Backed Up in {time.time() - close_event_start_time:.2f} Seconds')
+                close_event_time = close_event_start_time - self.pii_table_start_time
                 self.update_log(self.assistant.get_current_time(
                 ), f'Guard Window Closed after {close_event_time:.2f} Seconds')
 
@@ -670,13 +675,13 @@ class PIIWindow(QMainWindow):
                     row, column).text()
 
             final_item["PII"] = final_value.replace('"', "\'")
-            self.time_updt_strt_time = time.time()
+            self.time_update_start_time = time.time()
             try:
                 response = requests.patch(CONSTANTS.URL, json=final_item)
                 if response.status_code == 200:
                     response_data = response.json()
                     self.update_log(self.assistant.get_current_time(
-                    ), f"Update Time: {time.time() - self.time_updt_strt_time:.2f} Seconds")
+                    ), f"Update Time: {time.time() - self.time_update_start_time:.2f} Seconds")
                     self.update_log(self.assistant.get_current_time(
                     ), f"Update Function Response: {response_data}")
                     self.update_log(self.assistant.get_current_time(
@@ -706,12 +711,12 @@ class PIIWindow(QMainWindow):
         """Authenticate user and connect to server."""
         password = self.password_input.text()
         env_password = CONSTANTS.APP_PASSWORD
-        self.btnConnectServer.setText('Logging in...')
+        self.btn_connect_server.setText('Logging in...')
         if not env_password:
             QMessageBox.warning(
                 self, "Security Warning", "Please Activate your Secure Environment before performing operations")
-            self.btnConnectServer.setText('Connect to Server')
-            self.btnConnectServer.setDisabled(False)
+            self.btn_connect_server.setText('Connect to Server')
+            self.btn_connect_server.setDisabled(False)
             self.password_input.setHidden(True)
             return
 
@@ -719,7 +724,7 @@ class PIIWindow(QMainWindow):
         hashed_env_password = hashlib.sha256(env_password.encode()).hexdigest()
 
         if hashed_input_password == hashed_env_password:
-            self.btnConnectServer.setStyleSheet(
+            self.btn_connect_server.setStyleSheet(
                 "background-color: orange; color: white;")
             self.password_input.clear()
             self.password_input.setHidden(True)
@@ -730,49 +735,49 @@ class PIIWindow(QMainWindow):
             QMessageBox.warning(
                 self, "Authentication Failed", "Incorrect Password!")
             self.password_input.clear()
-            self.btnConnectServer.setText('Connect to Server')
-            self.btnConnectServer.setDisabled(False)
-            self.btnConnectServer.clicked.disconnect(
+            self.btn_connect_server.setText('Connect to Server')
+            self.btn_connect_server.setDisabled(False)
+            self.btn_connect_server.clicked.disconnect(
                 self.authenticate_and_connect)
-            self.btnConnectServer.clicked.connect(self.show_password_input)
+            self.btn_connect_server.clicked.connect(self.show_password_input)
 
     def connect_to_server(self):
         """Connect to the backend server and set up the interface."""
-        self.btnConnectServer.setDisabled(True)
+        self.btn_connect_server.setDisabled(True)
         try:
             self.agent = Agent(s3=CONSTANTS.AWS_S3,
                                file_name=CONSTANTS.AWS_FILE)
             self.assistant = Assistant(CONSTANTS.AWS_S3)
-            self.btnConnectServer.setText('Connected')
-            self.btnConnectServer.setDisabled(True)
-            self.btnConnectServer.setStyleSheet(
+            self.btn_connect_server.setText('Connected')
+            self.btn_connect_server.setDisabled(True)
+            self.btn_connect_server.setStyleSheet(
                 "background-color: green; color: white;")
-            self.btnDisplayData.setStyleSheet(
+            self.btn_display_data.setStyleSheet(
                 "background-color: green; color: white;")
-            self.btnDisplayData.setVisible(True)
-            self.btnAddEntry.setVisible(True)
+            self.btn_display_data.setVisible(True)
+            self.btn_add_entry.setVisible(True)
             self.log_table.setVisible(True)
             self.welcome_text.setVisible(True)
             self.data_table.setVisible(True)
-            self.btnAddEntry.setStyleSheet(
+            self.btn_add_entry.setStyleSheet(
                 "background-color: green; color: white;")
-            self.btnDisplayData.setToolTip('Click to download data')
-            self.btnConnectServer.setToolTip(
+            self.btn_display_data.setToolTip('Click to download data')
+            self.btn_connect_server.setToolTip(
                 'You are Connected Successfully. Button Disabled')
 
             # Create logout button
-            self.btnLogOut = QPushButton('LogOut', self)
-            self.btnLogOut.setCursor(QCursor(Qt.PointingHandCursor))
-            self.btnLogOut.clicked.connect(self.logout_user)
-            self.btnLogOut.setShortcut("Ctrl+W")
-            self.btnLogOut.resize(100, 40)
-            self.btnLogOut.show()
-            self.btnLogOut.setStyleSheet(
+            self.btn_logout = QPushButton('LogOut', self)
+            self.btn_logout.setCursor(QCursor(Qt.PointingHandCursor))
+            self.btn_logout.clicked.connect(self.logout_user)
+            self.btn_logout.setShortcut("Ctrl+W")
+            self.btn_logout.resize(100, 40)
+            self.btn_logout.show()
+            self.btn_logout.setStyleSheet(
                 "background-color: orange; color: white;")
-            self.btnLogOut.setDisabled(False)
-            self.btnLogOut.setToolTip('Click to Logout')
+            self.btn_logout.setDisabled(False)
+            self.btn_logout.setToolTip('Click to Logout')
             # position the logout to right side corner in the Top Right Corner
-            self.btnLogOut.move(self.width() - self.btnLogOut.width() - 10, 10)
+            self.btn_logout.move(self.width() - self.btn_logout.width() - 10, 10)
 
             # Set up timer for status updates
             self.timer = QTimer(self)
@@ -794,11 +799,11 @@ class PIIWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Connection Error",
                                  f"Failed to connect to server: {str(e)}")
-            self.btnConnectServer.setText('Connect to Server')
-            self.btnConnectServer.setDisabled(False)
-            self.btnConnectServer.clicked.disconnect(
+            self.btn_connect_server.setText('Connect to Server')
+            self.btn_connect_server.setDisabled(False)
+            self.btn_connect_server.clicked.disconnect(
                 self.authenticate_and_connect)
-            self.btnConnectServer.clicked.connect(self.show_password_input)
+            self.btn_connect_server.clicked.connect(self.show_password_input)
 
     def on_data_table_selection(self):
         """Handle selection in the data table to show sub-options."""
@@ -1106,7 +1111,7 @@ class PIIWindow(QMainWindow):
                 try:
                     if self.assistant:
                         self.update_log(self.assistant.get_current_time(),
-                                        f"Processing Logging Data...")
+                                        "Processing Logging Data...")
                         pre_log_time = time.time()
                         self.assistant.collect_logs()
                         self.update_log(self.assistant.get_current_time(
