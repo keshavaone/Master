@@ -8,7 +8,15 @@ from botocore.exceptions import ClientError
 
 
 def get_secret():
-
+    """
+    Retrieve a secret from AWS Secrets Manager.
+    
+    Returns:
+        str: The secret string value
+        
+    Raises:
+        ClientError: If there's an issue retrieving the secret
+    """
     secret_name = "prod/AWS/AccessKey"
     region_name = "us-east-1"
 
@@ -23,8 +31,9 @@ def get_secret():
         get_secret_value_response = client.get_secret_value(
             SecretId=secret_name
         )
+        secret = get_secret_value_response['SecretString']
+        return secret
     except ClientError as e:
-        raise e
-
-    secret = get_secret_value_response['SecretString']
-    return secret
+        # Add more specific error handling here if needed
+        print(f"Error retrieving secret: {e}")
+        raise

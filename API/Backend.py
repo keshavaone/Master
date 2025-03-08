@@ -4,7 +4,6 @@ import base64
 import os
 import io
 import time
-import time
 import pandas as pd
 import atexit
 from API.StoreSecrets import get_secret
@@ -18,38 +17,72 @@ from bson.objectid import ObjectId
 
 @dataclass(eq=False, repr=False, order=False)
 class Agent:
+    """
+    Agent class for handling secure data operations and encryption.
+    
+    Attributes:
+        s3 (str): S3 bucket name for storage
+        file_name (str): File name for data storage
+        input_path (str): Path for request input
+        stored_file_names (list): List of stored file names
+    """
     s3: str
     file_name: str
     input_path: str = 'ReQuest.txt'
     stored_file_names: list[str] = field(default_factory=list)
-    os.chdir(os.path.dirname(os.path.realpath(__file__)))
-
+    
     def __post_init__(self):
-        self.data_path: str = self.file_name
+        """Initialize the Agent with necessary resources and connections."""
+        # Change to the current directory
+        os.chdir(os.path.dirname(os.path.realpath(__file__)))
+        self.data_path = self.file_name
 
         self.status = {'Waking Up Mr.Agent...'}
-        self.__secret = ast.literal_eval(get_secret())
-        print('Secrets Fetched')
+        try:
+            self.__secret = ast.literal_eval(get_secret())
+            print('Secrets Fetched')
 
-        # Change region if needed
-        dynamodb = boto3.resource('dynamodb', region_name="us-east-1")
-
-        # Define the table
-        table_name = "myPII"
-        self.collection = dynamodb.Table(table_name)
-        self.__df = self.refresh_data()
-        self.fetch_my_key()
-        os.chdir(os.path.dirname(os.path.realpath(__file__)))
-        self.data_path: str = self.file_name
-        atexit.register(self.end_work)
+            # DynamoDB setup
+            dynamodb = boto3.resource('dynamodb', region_name="us-east-1")
+            table_name = "myPII"
+            self.collection = dynamodb.Table(table_name)
+            self.__df = self.refresh_data()
+            self.fetch_my_key()
+            
+            # Register cleanup handler
+            atexit.register(self.end_work)
+            self.chosen_one = None  # Initialize chosen_one attribute
+        except Exception as e:
+            print(f"Error in agent initialization: {e}")
+            raise
 
     def fetch_my_key(self):
-        self.__encoded_key = self.__secret['KMS_KEY_ID']
-        assert self.__encoded_key is not None
-        self.kms_client = KMS()
-        self.cipher_suite = self.kms_client.decrypt_my_key(self.__encoded_key)
+        """
+        Fetch and decrypt the KMS key.
+        
+        Raises:
+            AssertionError: If KMS key is not found
+        """
+        try:
+            self.__encoded_key = self.__secret['KMS_KEY_ID']
+            assert self.__encoded_key is not None, "KMS key not found in secrets"
+            self.kms_client = KMS()
+            self.cipher_suite = self.kms_client.decrypt_my_key(self.__encoded_key)
+        except Exception as e:
+            print(f"Error fetching key: {e}")
+            raise
 
     def filter_from_db(self, item_name=None, download_request=False):
+        """
+        Filter data from the database.
+        
+        Args:
+            item_name (str, optional): Name of the item to filter
+            download_request (bool, optional): Flag for download requests
+            
+        Returns:
+            bytes or int: Filtered data or 0 for download requests
+        """
         if download_request:
             return 0
         elif item_name is not None:
@@ -65,12 +98,18 @@ class Agent:
                 return None
 
     def process_request(self):
+        """
+        Process an input request.
+        
+        Returns:
+            Various: The processed output based on the request type
+        """
         input_request = self.process_file('r')
         if input_request == 'Download':
             self.download_excel()
             output = self.data_path
         elif input_request == 'Re-Encrypt':
-            self.upload_securely(self.file_name)
+            self.upload_securely()
             output = 'Success'
         else:
             data = self.filter_from_db(input_request)
@@ -80,14 +119,37 @@ class Agent:
             output = post_output.set_index('Item Name').to_json()
         print('Processed: ', input_request)
         os.remove(self.input_path)
+        return output  # Added return statement
 
     def read_excel_from_file(self, file_path):
+        """
+        Read Excel data from a file.
+        
+        Args:
+            file_path (str): Path to the Excel file
+            
+        Returns:
+            DataFrame: The Excel data
+            
+        Raises:
+            FileNotFoundError: If the file is not found
+        """
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
         df = pd.read_excel(file_path)
         return df
 
     def read_excel_from_s3(self, bucket_name, object_key):
+        """
+        Read Excel data from an S3 bucket.
+        
+        Args:
+            bucket_name (str): S3 bucket name
+            object_key (str): Object key in the bucket
+            
+        Returns:
+            DataFrame or None: The Excel data or None if error
+        """
         s3 = boto3.client('s3')
         try:
             response = s3.get_object(Bucket=bucket_name, Key=object_key)
@@ -99,9 +161,21 @@ class Agent:
             return None
 
     def refresh_data(self):
+        """
+        Refresh data from the database.
+        
+        Returns:
+            DataFrame: The refreshed data
+        """
         return pd.DataFrame(self.collection.scan()['Items'])
 
     def get_all_data(self):
+        """
+        Get all data with decryption.
+        
+        Returns:
+            DataFrame: All decrypted data
+        """
         df = self.refresh_data()
         self.__df = df.copy()
         for i in df.index:
@@ -111,16 +185,31 @@ class Agent:
                 try:
                     df.loc[i, 'PII'] = self.kms_client.decrypt_data(
                         self.filter_from_db(df.loc[i, 'Type']))
-                except:
+                except Exception as e:
                     df.loc[i, 'PII'] = 'Data may have inserted in the current session. please restart to see this entry'
         return df
 
     def get_one_data(self):
+        """
+        Get a specific data item.
+        
+        Returns:
+            str: The data item
+        """
         return_item = self.collection.find_one(
             {'Category': 'System', 'Type': 'KeyPassword'})
         return return_item['PII']
 
     def insert_new_data(self, item):
+        """
+        Insert new data with encryption.
+        
+        Args:
+            item (dict): Data to insert
+            
+        Returns:
+            bool or Exception: True if successful, Exception if error
+        """
         print(item)
         try:
             item = {
@@ -138,6 +227,15 @@ class Agent:
             return e
 
     def update_one_data(self, item):
+        """
+        Update existing data.
+        
+        Args:
+            item (dict): Data to update
+            
+        Returns:
+            dict: Update response
+        """
         print(item)
         updated_values = {"PII": base64.b64encode(
             self.cipher_suite.encrypt(item['PII'].encode('utf-8'))).decode('utf-8')}
@@ -156,30 +254,65 @@ class Agent:
         return response
 
     def delete_one_data(self, item):
+        """
+        Delete data item.
+        
+        Args:
+            item (dict): Item to delete
+            
+        Returns:
+            bool: True if deletion successful
+        """
         response = self.collection.delete_item(Key={'_id': item['_id']})
-        return response.acknowledged
+        return response.get('ResponseMetadata', {}).get('HTTPStatusCode') == 200
 
     def download_excel(self):
+        """
+        Download data to Excel.
+        
+        Returns:
+            bool: True if successful
+        """
         df = self.get_all_data()
         df.to_excel(self.data_path, index=False)
         print('Excel File Downloaded Successfully')
         return True
 
-    # for Desktop Application
-
     def get_options_to_choose(self):
+        """
+        Get category options.
+        
+        Returns:
+            list: List of unique categories
+        """
         df = self.get_all_data()
         return list(set(df['Category'].to_list()))
 
-    # for Desktop Application
     def get_sub_options_to_choose(self, category):
+        """
+        Get sub-options for a category.
+        
+        Args:
+            category (str): Category to get sub-options for
+            
+        Returns:
+            list: List of unique types for the category
+        """
         df = self.get_all_data()
         df = df[df['Category'] == category]
         self.chosen_one = category
         return list(set(df['Type'].to_list()))
 
-    # for Desktop Application
     def get_final_output(self, type):
+        """
+        Get final output for a specific type.
+        
+        Args:
+            type (str): Type to get output for
+            
+        Returns:
+            Various: The parsed output
+        """
         df = self.get_all_data()
         df = df[df['Category'] == self.chosen_one]
         df = df[df['Type'] == type]
@@ -191,8 +324,12 @@ class Agent:
             except:
                 return df['PII'].iloc[0]
 
-    # for Source Code
     def perform_specific_output(self):
+        """
+        Perform specific output based on user input.
+        
+        This is a CLI function for debug/testing purposes.
+        """
         # Fetch all data
         df = self.get_all_data()
 
@@ -232,7 +369,17 @@ class Agent:
             except KeyError:
                 print(item)
 
+    @staticmethod
     def isBase64(sb):
+        """
+        Check if a string is base64 encoded.
+        
+        Args:
+            sb (str or bytes): String to check
+            
+        Returns:
+            bool: True if base64 encoded
+        """
         try:
             if isinstance(sb, str):
                 # If there's any unicode here, an exception will be thrown and the function will return false
@@ -246,6 +393,17 @@ class Agent:
             return False
 
     def process_file(self, mode, data=None, file_path=None):
+        """
+        Process file operations.
+        
+        Args:
+            mode (str): File mode (r/w)
+            data (str, optional): Data to write
+            file_path (str, optional): Path to file
+            
+        Returns:
+            str or bool: File contents or success status
+        """
         if file_path:
             path = file_path
         else:
@@ -255,13 +413,19 @@ class Agent:
                 data = f.read()
         elif 'w' in mode:
             with open(path, mode) as f:
-                data = f.write(data)
+                f.write(data)
                 self.stored_file_names.append(path)
                 print('Stored: ', path)
                 return True
         return data
 
     def upload_securely(self):
+        """
+        Upload data securely to S3.
+        
+        Returns:
+            bool: True if successful
+        """
         self.refresh_data().to_csv(CONSTANTS.DATA_FILE_CSV,
                                    columns=['Type', 'Category', 'PII'])
         s3 = boto3.client('s3')
@@ -272,30 +436,41 @@ class Agent:
             else:
                 df.loc[i, 'PII'] = base64.b64encode(self.cipher_suite.encrypt(
                     df.loc[i, 'PII'].encode('utf-8'))).decode('utf-8')
-        # df.to_csv(file_path, index=False)
         try:
+            df.to_csv(CONSTANTS.DATA_FILE_CSV, index=False)
             with open(CONSTANTS.DATA_FILE_CSV, 'rb') as f:
                 s3.upload_fileobj(f, self.s3, CONSTANTS.DATA_FILE_CSV)
                 os.remove(CONSTANTS.DATA_FILE_CSV)
-                # print(f"File {CONSTANTS.DATA_FILE_CSV} uploaded to S3 successfully.")
                 return True
         except Exception as e:
             print(f"Error uploading file to S3: {e}")
             return False
 
+    def decrypt_data(self, data):
+        """
+        Decrypt data using KMS.
+        
+        Args:
+            data (bytes): Data to decrypt
+            
+        Returns:
+            str: Decrypted data
+        """
+        if self.kms_client and data:
+            return self.kms_client.decrypt_data(data)
+        return None
+
     def end_work(self):
+        """Clean up resources when the agent is terminated."""
         while self.stored_file_names:
             file = self.stored_file_names.pop()
-            os.remove(file)
-            time.sleep(0.2)
-        # self.status['Post Exit CleanUp: All'] = self.get_current_time()
+            try:
+                os.remove(file)
+                time.sleep(0.2)
+            except Exception as e:
+                print(f"Error removing file {file}: {e}")
 
 
 if __name__ == '__main__':
-
     agent = Agent(s3=CONSTANTS.AWS_S3, file_name=CONSTANTS.AWS_FILE)
-    # agent.upload_excel_to_s3('MyPII.PIIData.xlsx')
-    # agent.perform_specific_output()
-    # agent.download_excel()
-    agent.get_one_data()
-    # agent.begin_work()
+    # agent.get_one_data()
