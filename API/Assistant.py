@@ -1,6 +1,10 @@
-import boto3
-from dataclasses import dataclass
+"""
+Assistant module for handling logs and user sessions.
+"""
+
 import datetime
+from dataclasses import dataclass
+import boto3
 
 
 @dataclass
@@ -37,7 +41,7 @@ class Assistant:
                     f, self.s3, f'logs/application_{log_date}.log')
                 # os.remove('application.log')
                 return True
-        except Exception as e:
+        except boto3.exceptions.S3UploadFailedError as e:
             print(f"Error collecting logs: {e}")
             return False
 

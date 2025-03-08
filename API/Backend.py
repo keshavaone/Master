@@ -10,8 +10,6 @@ from API.store_secrets import get_secret
 import ast
 import API.CONSTANTS as CONSTANTS
 from API.KMS import KMS
-from pymongo import MongoClient
-from pymongo.server_api import ServerApi
 from bson.objectid import ObjectId
 
 
