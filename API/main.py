@@ -1,7 +1,12 @@
 from fastapi import FastAPI, HTTPException, status, Request, Depends
 import uvicorn
-from API.Backend import Agent
-import API.CONSTANTS as CONSTANTS  # type: ignore
+import sys
+import os
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
+
+from Backend import Agent
+import CONSTANTS as CONSTANTS
 from pydantic import ValidationError
 from typing import Dict, Any
 from collections import Counter

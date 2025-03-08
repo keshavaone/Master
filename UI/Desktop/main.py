@@ -4,6 +4,8 @@ from PyQt5.QtCore import *
 import sys, os, time, ast, logging, hashlib, subprocess,json
 import pandas as pd
 import requests
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+
 from API.Backend import Agent
 from API.Assistant import Assistant
 import API.CONSTANTS as CONSTANTS
