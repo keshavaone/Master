@@ -1,5 +1,5 @@
-from API.Backend import Agent
-from API.Assistant import Assistant
+from API.backend import Agent
+from API.assistant import Assistant
 import API.CONSTANTS as CONSTANTS
 from PyQt5.QtWidgets import (QLineEdit, QMessageBox, QInputDialog, 
                              QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,

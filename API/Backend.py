@@ -6,7 +6,7 @@ import io
 import time
 import pandas as pd
 import atexit
-from API.StoreSecrets import get_secret
+from API.store_secrets import get_secret
 import ast
 import API.CONSTANTS as CONSTANTS
 from API.KMS import KMS
