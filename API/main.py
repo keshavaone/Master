@@ -1,18 +1,13 @@
+from logging.handlers import RotatingFileHandler
+from fastapi.middleware.cors import CORSMiddleware
+import logging
+from collections import Counter
+from typing import Dict, Any
+from pydantic import ValidationError
+import CONSTANTS as CONSTANTS
+from Backend import Agent
 from fastapi import FastAPI, HTTPException, status, Request, Depends
 import uvicorn
-import sys
-import os
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
-
-from Backend import Agent
-import CONSTANTS as CONSTANTS
-from pydantic import ValidationError
-from typing import Dict, Any
-from collections import Counter
-import logging
-from fastapi.middleware.cors import CORSMiddleware
-from logging.handlers import RotatingFileHandler
 
 app = FastAPI()
 counter_calls = Counter()
@@ -36,18 +31,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-handler = RotatingFileHandler('application.log', maxBytes=1000000, backupCount=3)
+handler = RotatingFileHandler(
+    'application.log', maxBytes=1000000, backupCount=3)
 logging.basicConfig(handlers=[handler], level=logging.INFO)
+
+
 @app.middleware("http")
 async def count_api_calls(request: Request, call_next):
     response = await call_next(request)
     counter_calls["totalCalls"] += 1
-    print('Total API Calls: ',counter_calls["totalCalls"])
-    print('Current Session-Calling:',counter_calls["totalCalls"],request.method,':', request.url)
-    logging.info(f"Log from API EndPoint - Current Session-Calling Count: '{counter_calls['totalCalls']}'. Method: '{request.method}'. EndPoint: '{request.url}'")
+    print('Total API Calls: ', counter_calls["totalCalls"])
+    print('Current Session-Calling:',
+          counter_calls["totalCalls"], request.method, ':', request.url)
+    logging.info(
+        f"Log from API EndPoint - Current Session-Calling Count: '{counter_calls['totalCalls']}'. Method: '{request.method}'. EndPoint: '{request.url}'")
     return response
 
-def process_data(item,operation):
+
+def process_data(item, operation):
     try:
         match operation:
             case 'insert':
@@ -60,15 +61,18 @@ def process_data(item,operation):
                 return agent.get_all_data()
             case _:
                 raise ValueError("Invalid operation")
-        
+
         if response:
-            return {"message": f"PII data {operation}ed successfully","response":response}
+            return {"message": f"PII data {operation}ed successfully", "response": response}
         else:
             return {"message": f"Failed to {operation} PII data. Reason: {response}"}
     except ValidationError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-#1. API for CREATE
+# 1. API for CREATE
+
+
 @app.post("/pii")
 async def insert_pii_item(item: Dict[str, Any]):
     return process_data(item, 'insert')
@@ -83,9 +87,10 @@ async def update_pii_item(item: Dict[str, Any]):
 async def delete_pii_item(item: Dict[str, Any]):
     return process_data(item, 'delete')
 
+
 @app.get("/pii")
 async def get_pii_data():
-   return process_data(None, 'get')
+    return process_data(None, 'get')
 
 
 if __name__ == "__main__":
