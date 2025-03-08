@@ -23,8 +23,8 @@ from logging.handlers import RotatingFileHandler
 import pandas as pd
 import requests
 from PyQt5.QtWidgets import (
-    QLineEdit, QMessageBox, QInputDialog, QMainWindow, QWidget, 
-    QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QTableWidget, 
+    QLineEdit, QMessageBox, QInputDialog, QMainWindow, QWidget,
+    QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QTableWidget,
     QHeaderView, QTableWidgetItem, QDialog, QScrollArea, QSizePolicy,
     QAbstractItemView, QApplication, QMenu, QAction
 )
@@ -79,12 +79,12 @@ class PIIWindow(QMainWindow):
         self.time_update_start_time = None
         self.timer = None
         self.start_time = None
-        
+
         # Set up UI
         self.ui_components()
         self.show()
         self.showMaximized()
-        
+
         # Connect the close event to the cleanup function
         self.close_event = self.cleanup_on_exit
 
@@ -96,7 +96,7 @@ class PIIWindow(QMainWindow):
 
         # Welcome text
         self.welcome_text = QLabel(
-            f"Welcome to GUARD: {os.environ.get('USER', 'USER').upper()}", 
+            f"Welcome to GUARD: {os.environ.get('USER', 'USER').upper()}",
             central_widget
         )
         self.welcome_text.setStyleSheet("font-size: 15px; font-weight: bold;")
@@ -105,10 +105,10 @@ class PIIWindow(QMainWindow):
 
         # Connect server button
         self.btn_connect_server = self.set_button(
-            'Connect to Server', 
-            'Click to connect to server', 
-            'Ctrl+Q', 
-            self.show_password_input, 
+            'Connect to Server',
+            'Click to connect to server',
+            'Ctrl+Q',
+            self.show_password_input,
             visible_true=True
         )
         layout.addWidget(self.btn_connect_server, alignment=Qt.AlignCenter)
@@ -131,37 +131,37 @@ class PIIWindow(QMainWindow):
 
         # Log table
         self.log_table = self.set_table(
-            columncount=2, 
+            columncount=2,
             hlabels=['Timestamp', 'Action/Task Performed']
         )
         layout.addWidget(self.log_table)
 
         # Button layout
         button_layout = QHBoxLayout()
-        
+
         # Display data button
         self.btn_display_data = self.set_button(
-            'Display Data', 
+            'Display Data',
             'Click to display data',
-            'Ctrl+D', 
-            self.show_data_window, 
+            'Ctrl+D',
+            self.show_data_window,
             style="background-color: gray; color: black;"
         )
         button_layout.addWidget(self.btn_display_data)
 
         # Add entry button
         self.btn_add_entry = self.set_button(
-            'Add New Entry', 
-            'Click to add a new entry', 
-            'Ctrl+N', 
+            'Add New Entry',
+            'Click to add a new entry',
+            'Ctrl+N',
             self.add_new_entry
         )
         button_layout.addWidget(self.btn_add_entry)
         button_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addLayout(button_layout)
 
-    def set_button(self, btn_name, tooltip, shortcut, connect, 
-                   visible_true=False, 
+    def set_button(self, btn_name, tooltip, shortcut, connect,
+                   visible_true=False,
                    style="background-color: green; color: white;"):
         """
         Create and configure a button.
@@ -210,9 +210,10 @@ class PIIWindow(QMainWindow):
     def logout_user(self):
         """Perform logout operations."""
         if not self.assistant:
-            QMessageBox.warning(self, "Logout Error", "Not currently logged in.")
+            QMessageBox.warning(self, "Logout Error",
+                                "Not currently logged in.")
             return
-            
+
         self.update_log(self.assistant.get_current_time(), 'Logging Out...')
         self.ui_components()
         self.update_log(
@@ -270,7 +271,8 @@ class PIIWindow(QMainWindow):
             remove_button = QPushButton("-", dialog)
             remove_button.setFixedSize(35, 25)
             remove_button.clicked.connect(
-                lambda: remove_pii_item(item_layout, item_name_input, item_data_input)
+                lambda: remove_pii_item(
+                    item_layout, item_name_input, item_data_input)
             )
             item_layout.addWidget(remove_button)
 
@@ -368,8 +370,8 @@ class PIIWindow(QMainWindow):
             response = requests.get(CONSTANTS.URL)
             if response.status_code != 200:
                 QMessageBox.warning(
-                    self, 
-                    "Error", 
+                    self,
+                    "Error",
                     f"Failed to fetch data from server. Status code: {response.status_code}"
                 )
                 return None
@@ -377,8 +379,8 @@ class PIIWindow(QMainWindow):
             return data
         except Exception as e:
             QMessageBox.warning(
-                self, 
-                "Error", 
+                self,
+                "Error",
                 f"Failed to fetch data from server: {str(e)}"
             )
             return None
@@ -403,8 +405,8 @@ class PIIWindow(QMainWindow):
             if response.status_code == 200:
                 # We don't need to store the response data in this case
                 QMessageBox.information(
-                    self, 
-                    "Insertion Successful", 
+                    self,
+                    "Insertion Successful",
                     "New entry has been inserted successfully!"
                 )
                 new_entry.update({'PII': 'Hidden'})
@@ -418,13 +420,13 @@ class PIIWindow(QMainWindow):
                     self.populate_data_table(data)
             else:
                 QMessageBox.warning(
-                    self, 
+                    self,
                     "Insertion Failed",
                     f"Failed to insert new entry. Status code: {response.status_code}"
                 )
         except (ValueError, SyntaxError) as e:
             QMessageBox.warning(
-                self, 
+                self,
                 "Invalid Input",
                 f"Please check the Error Below.\n\n{str(e)}"
             )
@@ -452,13 +454,13 @@ class PIIWindow(QMainWindow):
         )
         if response:
             QMessageBox.information(
-                self, 
-                "Download Complete", 
+                self,
+                "Download Complete",
                 "Data downloaded and decrypted successfully!"
             )
         else:
             QMessageBox.warning(
-                self, 
+                self,
                 "Download Failed",
                 "Failed to download data!"
             )
@@ -478,10 +480,10 @@ class PIIWindow(QMainWindow):
     def handle_data_response(self, response):
         """
         Handle API response and parse data.
-        
+
         Args:
             response: API response object
-            
+
         Returns:
             pd.DataFrame or None: Parsed data or None if error
         """
@@ -489,7 +491,7 @@ class PIIWindow(QMainWindow):
             raise ValueError(
                 f"Error response from server. Status code: {response.status_code}"
             )
-        
+
         response_data = response.json()
         data_frame = pd.DataFrame(response_data)
         self.columns = data_frame.columns
@@ -502,7 +504,7 @@ class PIIWindow(QMainWindow):
     def populate_table_widget(self, data_frame):
         """
         Populate the table widget with data from DataFrame.
-        
+
         Args:
             data_frame (pd.DataFrame): Data to display
         """
@@ -524,11 +526,11 @@ class PIIWindow(QMainWindow):
                 if data_frame.columns[col] == 'PII' and isinstance(value, str):
                     try:
                         pii_list = ast.literal_eval(value)
-                        if (isinstance(pii_list, list) and 
+                        if (isinstance(pii_list, list) and
                                 all(isinstance(d, dict) for d in pii_list)):
                             formatted_value = '\n'.join(
                                 f"{d['Item Name']} - {str(d['Data'])}"
-                                for d in pii_list 
+                                for d in pii_list
                                 if 'Item Name' in d and 'Data' in d
                             )
                             item = QTableWidgetItem(formatted_value)
@@ -566,7 +568,7 @@ class PIIWindow(QMainWindow):
             data_window = QMainWindow(self)
             data_window.setWindowTitle("Your Guard Data")
             window_flags = (Qt.Window | Qt.CustomizeWindowHint | Qt.WindowTitleHint |
-                           Qt.WindowCloseButtonHint | Qt.WindowMinimizeButtonHint)
+                            Qt.WindowCloseButtonHint | Qt.WindowMinimizeButtonHint)
             data_window.setWindowFlags(window_flags)
 
             central_widget = QWidget(data_window)
@@ -586,19 +588,19 @@ class PIIWindow(QMainWindow):
                     f'JSON Error: {str(jde)}'
                 )
                 QMessageBox.warning(
-                    self, 
+                    self,
                     "Data Error",
                     "Received data is not in JSON format."
                 )
                 return
             except (subprocess.CalledProcessError, ValueError) as e:
                 self.update_log(
-                    self.assistant.get_current_time(), 
+                    self.assistant.get_current_time(),
                     f'Error: {str(e)}'
                 )
                 QMessageBox.warning(
-                    self, 
-                    "Connection Error", 
+                    self,
+                    "Connection Error",
                     "Invalid server response or connection issue. Please check the server."
                 )
                 return
@@ -635,16 +637,16 @@ class PIIWindow(QMainWindow):
                     self.assistant.get_current_time(),
                     'Guard Window Closed'
                 )
-                
+
                 if self.modified:
                     self.update_log(
-                        self.assistant.get_current_time(), 
+                        self.assistant.get_current_time(),
                         'Data Backup Initiated...'
                     )
                     # Use updated method signature without parameters
                     self.agent.upload_securely()
                     self.update_log(
-                        self.assistant.get_current_time(), 
+                        self.assistant.get_current_time(),
                         'Refreshing Data...'
                     )
                     refresh_time = time.time()
@@ -661,7 +663,7 @@ class PIIWindow(QMainWindow):
                             self.assistant.get_current_time(),
                             'Data Backed Up in %.2f Seconds' % backup_duration
                         )
-                        
+
                 close_event_time = close_event_start_time - self.pii_table_start_time
                 self.update_log(
                     self.assistant.get_current_time(),
@@ -677,21 +679,21 @@ class PIIWindow(QMainWindow):
                     'Connection Error: Unable to reach server.'
                 )
                 QMessageBox.warning(
-                    self, 
-                    "Connection Error", 
+                    self,
+                    "Connection Error",
                     "Please run the Server. Application unable to detect SERVER"
                 )
                 return
-            
+
             QMessageBox.warning(
-                self, 
-                "Connection Error", 
+                self,
+                "Connection Error",
                 "Please run the Server. Application unable to detect SERVER"
             )
         except Exception as e:
             QMessageBox.critical(
-                self, 
-                "Error", 
+                self,
+                "Error",
                 f"An unexpected error occurred: {str(e)}"
             )
 
@@ -746,7 +748,7 @@ class PIIWindow(QMainWindow):
     def show_edit_dialog(self, selected_items, item, old_value):
         """
         Show dialog for editing PII data.
-        
+
         Args:
             selected_items: Selected table items
             item: The specific item to edit
@@ -823,7 +825,7 @@ class PIIWindow(QMainWindow):
     def process_edit_result(self, selected_items, item, edits):
         """
         Process the result of editing PII data.
-        
+
         Args:
             selected_items: Selected table items
             item: The specific item being edited
@@ -840,7 +842,7 @@ class PIIWindow(QMainWindow):
 
         # Convert edited entries into JSON format
         final_value_list = [
-            {"Item Name": item_name_edit.text(), "Data": data_edit.text()} 
+            {"Item Name": item_name_edit.text(), "Data": data_edit.text()}
             for item_name_edit, data_edit in edits
         ]
         final_value = json.dumps(final_value_list)
@@ -850,11 +852,12 @@ class PIIWindow(QMainWindow):
             row = i.row()
             column = i.column()
             column_name = self.table_widget.horizontalHeaderItem(column).text()
-            final_item[column_name] = self.table_widget.item(row, column).text()
+            final_item[column_name] = self.table_widget.item(
+                row, column).text()
 
         final_item["PII"] = final_value.replace('"', "\'")
         self.time_update_start_time = time.time()
-        
+
         try:
             response = requests.patch(CONSTANTS.URL, json=final_item)
             if response.status_code == 200:
@@ -874,20 +877,20 @@ class PIIWindow(QMainWindow):
                 )
                 self.modified = True
                 QMessageBox.information(
-                    self, 
-                    "Update Successful", 
+                    self,
+                    "Update Successful",
                     "Data updated successfully!"
                 )
             else:
                 QMessageBox.warning(
-                    self, 
-                    "Update Failed", 
+                    self,
+                    "Update Failed",
                     f"Failed to update data! Status code: {response.status_code}"
                 )
         except Exception as e:
             QMessageBox.critical(
-                self, 
-                "Error", 
+                self,
+                "Error",
                 f"An error occurred while updating: {str(e)}"
             )
 
@@ -899,18 +902,19 @@ class PIIWindow(QMainWindow):
         selected_items = self.table_widget.selectedItems()
         if selected_items:
             clipboard = QApplication.clipboard()
-            clipboard.setText('\t'.join(item.text() for item in selected_items))
+            clipboard.setText('\t'.join(item.text()
+                              for item in selected_items))
 
     def authenticate_and_connect(self):
         """Authenticate user and connect to server."""
         password = self.password_input.text()
         env_password = CONSTANTS.APP_PASSWORD
         self.btn_connect_server.setText('Logging in...')
-        
+
         if not env_password:
             QMessageBox.warning(
-                self, 
-                "Security Warning", 
+                self,
+                "Security Warning",
                 "Please Activate your Secure Environment before performing operations"
             )
             self.btn_connect_server.setText('Connect to Server')
@@ -934,8 +938,8 @@ class PIIWindow(QMainWindow):
             )
         else:
             QMessageBox.warning(
-                self, 
-                "Authentication Failed", 
+                self,
+                "Authentication Failed",
                 "Incorrect Password!"
             )
             self.password_input.clear()
@@ -955,7 +959,7 @@ class PIIWindow(QMainWindow):
                 file_name=CONSTANTS.AWS_FILE
             )
             self.assistant = Assistant(CONSTANTS.AWS_S3)
-            
+
             # Update button states
             self.btn_connect_server.setText('Connected')
             self.btn_connect_server.setDisabled(True)
@@ -1006,7 +1010,7 @@ class PIIWindow(QMainWindow):
             )
         except Exception as e:
             QMessageBox.critical(
-                self, 
+                self,
                 "Connection Error",
                 f"Failed to connect to server: {str(e)}"
             )
@@ -1032,7 +1036,7 @@ class PIIWindow(QMainWindow):
         self.btn_logout.setToolTip('Click to Logout')
         # Position the logout to right side corner in the Top Right Corner
         self.btn_logout.move(
-            self.width() - self.btn_logout.width() - 10, 
+            self.width() - self.btn_logout.width() - 10,
             10
         )
 
@@ -1044,7 +1048,7 @@ class PIIWindow(QMainWindow):
         selected_items = self.data_table.selectedItems()
         if not selected_items:
             return
-            
+
         selected_item_text = selected_items[0].text()
         try:
             sub_options = self.agent.get_sub_options_to_choose(
@@ -1063,8 +1067,8 @@ class PIIWindow(QMainWindow):
                 0,
                 False,  # Editable flag set to False
                 Qt.WindowFlags(
-                    Qt.WindowTitleHint | 
-                    Qt.WindowSystemMenuHint | 
+                    Qt.WindowTitleHint |
+                    Qt.WindowSystemMenuHint |
                     Qt.WindowCloseButtonHint
                 )
             )
@@ -1078,7 +1082,7 @@ class PIIWindow(QMainWindow):
                 self.show_output_dialog(sub_option, output)
         except Exception as e:
             QMessageBox.warning(
-                self, 
+                self,
                 "Selection Error",
                 f"Error processing selection: {str(e)}"
             )
@@ -1131,7 +1135,7 @@ class PIIWindow(QMainWindow):
     def setup_dialog_content(self, dialog, dialog_layout, output):
         """
         Set up the content of the output dialog.
-        
+
         Args:
             dialog: The dialog to set up
             dialog_layout: Layout of the dialog
@@ -1147,10 +1151,11 @@ class PIIWindow(QMainWindow):
         if isinstance(output, list):
             for item in output:
                 h_layout = QHBoxLayout()
-                
+
                 if isinstance(item, dict):
                     # Handle dictionary items (most common case)
-                    self.add_dict_item_to_layout(dialog, h_layout, scroll_layout, item)
+                    self.add_dict_item_to_layout(
+                        dialog, h_layout, scroll_layout, item)
                 else:
                     # Handle non-dictionary items
                     label = QLabel(str(item), dialog)
@@ -1161,7 +1166,7 @@ class PIIWindow(QMainWindow):
         else:
             # Handle error case
             QMessageBox.warning(
-                self, 
+                self,
                 "Error Code: 404 and 503 WARNING MESSAGE",
                 "You are Not Allowed to view this here."
             )
@@ -1177,7 +1182,7 @@ class PIIWindow(QMainWindow):
         scroll_content.setLayout(scroll_layout)
         scroll_area.setWidget(scroll_content)
         dialog_layout.addWidget(scroll_area)
-        
+
         # Add close button
         close_button = QPushButton('Close', dialog)
         close_button.clicked.connect(dialog.close)
@@ -1200,7 +1205,7 @@ class PIIWindow(QMainWindow):
     def add_dict_item_to_layout(self, dialog, h_layout, scroll_layout, item):
         """
         Add a dictionary item to the dialog layout.
-        
+
         Args:
             dialog: Parent dialog
             h_layout: Horizontal layout to add to
@@ -1211,23 +1216,23 @@ class PIIWindow(QMainWindow):
         item_name = item.get('Item Name', 'N/A')
         item_data = str(item.get('Data', 'N/A'))
         label = QLabel(f"{item_name} : {item_data}", dialog)
-        
+
         # Create copy button
         copy_button = QPushButton('Copy', dialog)
         copy_button.setToolTip('Click to copy the data')
         copy_button.setCursor(QCursor(Qt.PointingHandCursor))
         item["Button"] = copy_button
-        
+
         # Connect button to copy function
         copy_button.clicked.connect(
             lambda checked, data=item: self.copy_to_clipboard(data)
         )
-        
+
         # Style components
         label.setWordWrap(True)
         copy_button.setStyleSheet("background-color: White; color: Black;")
         label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        
+
         # Add to layout
         h_layout.addWidget(label)
         h_layout.addWidget(copy_button)
@@ -1295,7 +1300,7 @@ class PIIWindow(QMainWindow):
         """
         if 'Category' not in data.columns:
             QMessageBox.warning(
-                self, 
+                self,
                 "Data Error",
                 "Category column missing in data"
             )
@@ -1310,7 +1315,7 @@ class PIIWindow(QMainWindow):
         """Delete the selected item from the database."""
         if not hasattr(self, 'table_widget') or not self.table_widget:
             QMessageBox.warning(
-                self, 
+                self,
                 "Delete Error",
                 "Data table not available."
             )
@@ -1319,7 +1324,7 @@ class PIIWindow(QMainWindow):
         selected_items = self.table_widget.selectedItems()
         if not selected_items:
             QMessageBox.warning(
-                self, 
+                self,
                 "Delete Error",
                 "No item selected to delete."
             )
@@ -1329,17 +1334,17 @@ class PIIWindow(QMainWindow):
         item_info = self.get_item_info_from_selection(selected_items)
         if not self.confirm_delete(item_info):
             return
-            
+
         # Perform deletion
         self.perform_delete_operation(item_info, selected_items[0].row())
 
     def get_item_info_from_selection(self, selected_items):
         """
         Extract item information from selected items.
-        
+
         Args:
             selected_items: Selected table items
-            
+
         Returns:
             dict: Item information
         """
@@ -1359,16 +1364,16 @@ class PIIWindow(QMainWindow):
                 item_info['Type'] = item.text()
             elif header == '_id':
                 item_info['_id'] = item.text()
-                
+
         return item_info
 
     def confirm_delete(self, item_info):
         """
         Confirm deletion with user.
-        
+
         Args:
             item_info: Information about the item to delete
-            
+
         Returns:
             bool: True if confirmed, False otherwise
         """
@@ -1378,7 +1383,7 @@ class PIIWindow(QMainWindow):
             f"with type '{item_info['Type']}'?\n\n"
             f"Note: This Action is Irreversible!"
         )
-        
+
         reply = QMessageBox.question(
             self,
             "Confirm Delete",
@@ -1386,13 +1391,13 @@ class PIIWindow(QMainWindow):
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
-        
+
         return reply == QMessageBox.Yes
 
     def perform_delete_operation(self, item_info, row):
         """
         Perform the actual delete operation.
-        
+
         Args:
             item_info: Information about the item
             row: Row index in the table
@@ -1403,13 +1408,13 @@ class PIIWindow(QMainWindow):
             'Category': item_info['Category'],
             'Type': item_info['Type']
         }
-        
+
         try:
             response = requests.delete(CONSTANTS.URL, json=delete_data)
             if response.status_code == 200:
                 QMessageBox.information(
-                    self, 
-                    "Deletion Complete", 
+                    self,
+                    "Deletion Complete",
                     "Item deleted successfully!"
                 )
                 self.update_log(
@@ -1426,7 +1431,7 @@ class PIIWindow(QMainWindow):
                 )
         except Exception as e:
             QMessageBox.critical(
-                self, 
+                self,
                 "Delete Error",
                 f"Error deleting item: {str(e)}"
             )
@@ -1454,7 +1459,7 @@ class PIIWindow(QMainWindow):
     def fetch_status(self):
         """Fetch status updates from the agent."""
         try:
-            if (hasattr(self, 'agent') and self.agent and 
+            if (hasattr(self, 'agent') and self.agent and
                     hasattr(self.agent, 'status')):
                 for task_name, task_time in self.agent.status.items():
                     self.update_log(task_time, task_name)
