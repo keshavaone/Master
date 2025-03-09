@@ -4,6 +4,53 @@
 
 GUARD is a comprehensive, secure system for managing Personally Identifiable Information (PII) with enterprise-grade security features. The application encrypts sensitive data using AWS Key Management Service (KMS), stores it securely, and provides a user-friendly interface for authorized access and management.
 
+flowchart TB
+    subgraph "Frontend Container"
+        UI[UI Application]
+        SessionManager[Session Manager]
+        UI --> SessionManager
+    end
+    
+    subgraph "API Container"
+        API[API Service]
+        Auth[Auth Service]
+        KMS[KMS Integration]
+        DB[DynamoDB Access]
+        Audit[Audit Logger]
+        
+        API --> Auth
+        API --> KMS
+        API --> DB
+        API --> Audit
+        Auth --> KMS
+    end
+    
+    subgraph "AWS Services"
+        DynamoDB[(DynamoDB Primary)]
+        DynamoDBReplica[(DynamoDB Replica)]
+        KMSService[KMS]
+        S3[S3 Bucket]
+        SecretsManager[Secrets Manager]
+        IAM[IAM/SSO]
+        
+        DynamoDB --> DynamoDBReplica
+        DB --> DynamoDB
+        KMS --> KMSService
+        Audit --> S3
+        Auth --> IAM
+        Auth --> SecretsManager
+    end
+    
+    UI -->|Secure API Calls| API
+    SessionManager -->|AWS SSO Token| Auth
+    SessionManager -->|JWT Token| UI
+    
+    style API fill:#f9f,stroke:#333,stroke-width:2px
+    style UI fill:#bbf,stroke:#333,stroke-width:2px
+    style DynamoDB fill:#bfb,stroke:#333,stroke-width:2px
+    style DynamoDBReplica fill:#bfb,stroke:#333,stroke-width:2px,stroke-dasharray: 5 5
+    style KMSService fill:#fbb,stroke:#333,stroke-width:2px
+    style IAM fill:#fbf,stroke:#333,stroke-width:2px
 
 ## Key Features
 
