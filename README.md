@@ -4,7 +4,6 @@
 
 GUARD is a comprehensive, secure system for managing Personally Identifiable Information (PII) with enterprise-grade security features. The application encrypts sensitive data using AWS Key Management Service (KMS), stores it securely, and provides a user-friendly interface for authorized access and management.
 
-![GUARD System Architecture](https://via.placeholder.com/800x400?text=GUARD+System+Architecture)
 
 ## Key Features
 
