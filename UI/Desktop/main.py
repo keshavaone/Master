@@ -1508,3 +1508,5 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
     window = PIIWindow()
     sys.exit(app.exec_())
+
+# export PYTHONPATH=$PYTHONPATH:$(pwd)
