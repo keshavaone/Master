@@ -26,13 +26,14 @@ from PyQt5.QtWidgets import (
     QLineEdit, QMessageBox, QInputDialog, QMainWindow, QWidget,
     QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QTableWidget,
     QHeaderView, QTableWidgetItem, QDialog, QScrollArea, QSizePolicy,
-    QAbstractItemView, QApplication, QMenu, QAction
+    QAbstractItemView, QApplication, QMenu, QAction, QTabWidget
 )
 from PyQt5.QtGui import QIcon, QCursor, QGuiApplication
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, QDateTime
 
 # Local application imports
 from API.backend import Agent
+from API.youtube_download import YouTubeDownloaderWidget, integrate_youtube_downloader
 from API.assistant import Assistant
 import API.CONSTANTS as CONSTANTS
 
@@ -92,16 +93,26 @@ class PIIWindow(QMainWindow):
         """Initialize and set up the UI components."""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        layout = QVBoxLayout(central_widget)
-
+        
+        # Create main layout
+        main_layout = QVBoxLayout(central_widget)
+        
+        # Create tab widget for multiple tabs
+        self.tab_widget = QTabWidget()
+        main_layout.addWidget(self.tab_widget)
+        
+        # Create PII Data tab widget and layout
+        self.pii_tab = QWidget()
+        pii_layout = QVBoxLayout(self.pii_tab)
+        
         # Welcome text
         self.welcome_text = QLabel(
             f"Welcome to GUARD: {os.environ.get('USER', 'USER').upper()}",
-            central_widget
+            self.pii_tab
         )
         self.welcome_text.setStyleSheet("font-size: 15px; font-weight: bold;")
         self.welcome_text.setVisible(False)
-        layout.addWidget(self.welcome_text, alignment=Qt.AlignCenter)
+        pii_layout.addWidget(self.welcome_text, alignment=Qt.AlignCenter)
 
         # Connect server button
         self.btn_connect_server = self.set_button(
@@ -111,7 +122,7 @@ class PIIWindow(QMainWindow):
             self.show_password_input,
             visible_true=True
         )
-        layout.addWidget(self.btn_connect_server, alignment=Qt.AlignCenter)
+        pii_layout.addWidget(self.btn_connect_server, alignment=Qt.AlignCenter)
 
         # Password input
         self.password_input = QLineEdit(self)
@@ -120,21 +131,21 @@ class PIIWindow(QMainWindow):
             self.authenticate_and_connect
         )
         self.password_input.setHidden(True)
-        layout.addWidget(self.password_input)
+        pii_layout.addWidget(self.password_input)
 
         # Data table
         self.data_table = self.set_table(columncount=1, hlabels=['Item Name'])
         self.data_table.itemSelectionChanged.connect(
             self.on_data_table_selection
         )
-        layout.addWidget(self.data_table)
+        pii_layout.addWidget(self.data_table)
 
         # Log table
         self.log_table = self.set_table(
             columncount=2,
             hlabels=['Timestamp', 'Action/Task Performed']
         )
-        layout.addWidget(self.log_table)
+        pii_layout.addWidget(self.log_table)
 
         # Button layout
         button_layout = QHBoxLayout()
@@ -158,8 +169,71 @@ class PIIWindow(QMainWindow):
         )
         button_layout.addWidget(self.btn_add_entry)
         button_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addLayout(button_layout)
+        pii_layout.addLayout(button_layout)
+        
+        # Add the PII tab to tab widget
+        self.tab_widget.addTab(self.pii_tab, "PII Data Management")
+        
+        # Create and add YouTube Downloader tab
+        self.downloader_widget = YouTubeDownloaderWidget(
+            parent=self,
+            log_callback=lambda msg: self.update_log(
+                self.assistant.get_current_time() if hasattr(self, 'assistant') and self.assistant is not None else 
+                QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
+                f"YouTube Downloader: {msg}"
+            ) if hasattr(self, 'update_log') else None
+        )
+        
+        # Add YouTube downloader tab
+        self.tab_widget.addTab(self.downloader_widget, "YouTube Downloader")
+        
+        # Set YouTube downloader as the default tab
+        self.tab_widget.setCurrentIndex(1)
+        
+        # Log the initialization of the YouTube downloader
+        QTimer.singleShot(500, lambda: self.log_youtube_init())
 
+    def log_youtube_init(self):
+        """Log the initialization of the YouTube downloader component."""
+        try:
+            if hasattr(self, 'update_log'):
+                timestamp = self.assistant.get_current_time() if hasattr(self, 'assistant') and self.assistant is not None else \
+                        QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
+                self.update_log(timestamp, "YouTube Downloader component initialized")
+        except Exception as e:
+            print(f"Error logging YouTube init: {e}")
+
+    # Modify the logout_user method to keep the YouTube downloader tab accessible
+    def logout_user(self):
+        """Perform logout operations."""
+        if not self.assistant:
+            QMessageBox.warning(self, "Logout Error",
+                                "Not currently logged in.")
+            return
+
+        self.update_log(self.assistant.get_current_time(), 'Logging Out...')
+        
+        # Switch to YouTube downloader tab before logout
+        if hasattr(self, 'tab_widget'):
+            downloader_tab_index = self.tab_widget.indexOf(self.downloader_widget)
+            self.tab_widget.setCurrentIndex(downloader_tab_index)
+        
+        self.ui_components()
+        self.update_log(
+            self.assistant.get_current_time(),
+            'Logged Out Successfully.'
+        )
+        self.cleanup_on_exit()
+        self.modified = False
+        if self.btn_logout:
+            self.btn_logout.setVisible(False)
+        self.assistant.logout()
+        self.agent = None
+        
+        # Switch to YouTube downloader tab again to ensure it's visible
+        if hasattr(self, 'tab_widget') and hasattr(self, 'downloader_widget'):
+            downloader_tab_index = self.tab_widget.indexOf(self.downloader_widget)
+            self.tab_widget.setCurrentIndex(downloader_tab_index)       
     def set_button(self, btn_name, tooltip, shortcut, connect,
                    visible_true=False,
                    style="background-color: green; color: white;"):
