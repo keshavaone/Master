@@ -695,15 +695,39 @@ class Agent:
 
     def download_excel(self):
         """
-        Download data to Excel.
+        Download data to Excel with robust handling of different input types.
 
         Returns:
             bool: True if successful
         """
-        df = self.get_all_data()
-        df.to_excel(self.data_path, index=False)
-        print('Excel File Downloaded Successfully')
-        return True
+        try:
+            # Get the data
+            df = self.get_all_data()
+            
+            # Convert list to DataFrame if needed
+            if isinstance(df, list):
+                df = pd.DataFrame(df)
+            
+            # Ensure we have a DataFrame
+            if not isinstance(df, pd.DataFrame):
+                # logging.error(f"Unexpected data type for Excel download: {type(df)}")
+                return False
+            
+            # Remove empty columns if any
+            df = df.dropna(axis=1, how='all')
+            
+            # Ensure readable column names
+            df.columns = [str(col).strip() for col in df.columns]
+            
+            # Write to Excel
+            df.to_excel(self.data_path, index=False)
+            
+            print(f'Excel File Downloaded Successfully to {self.data_path}')
+            return True
+        
+        except Exception as e:
+            print(f"Error during Excel download: {str(e)}")
+            return False
 
     def get_options_to_choose(self):
         """

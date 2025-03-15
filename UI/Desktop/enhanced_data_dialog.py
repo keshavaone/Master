@@ -9,8 +9,8 @@ from PyQt5.QtWidgets import (
     QGroupBox, QFormLayout, QTextEdit, QScrollArea, QSizePolicy, QStyle,
     QProgressDialog
 )
-from PyQt5.QtCore import Qt, QSize, QTimer
-from PyQt5.QtGui import QIcon, QColor, QPalette
+from PyQt5.QtCore import Qt, QSize, QTimer, QDateTime
+from PyQt5.QtGui import QIcon, QColor, QPalette, QFont
 import pandas as pd
 import logging
 import ast
@@ -776,60 +776,7 @@ class EnhancedDataDialog(QDialog):
             except RuntimeError:
                 pass
 
-    def populate_table(self):
-        """Populate the table with filtered data and improved styling."""
-        # Clear existing rows
-        self.table.setRowCount(0)
-        
-        if not self.filtered_data:
-            return
-                
-        # Populate table with filtered data
-        for row, item in enumerate(self.filtered_data):
-            self.table.insertRow(row)
-            
-            # ID column
-            id_item = QTableWidgetItem(item.get('_id', ''))
-            id_item.setTextAlignment(Qt.AlignCenter)
-            self.table.setItem(row, 0, id_item)
-            
-            # Category column
-            category_item = QTableWidgetItem(item.get('Category', ''))
-            category_item.setTextAlignment(Qt.AlignCenter)
-            self.table.setItem(row, 1, category_item)
-            
-            # Type column
-            type_item = QTableWidgetItem(item.get('Type', ''))
-            type_item.setTextAlignment(Qt.AlignCenter)
-            self.table.setItem(row, 2, type_item)
-            
-            # PII Data preview
-            pii_text = self.get_pii_preview(item.get('PII', ''))
-            pii_item = QTableWidgetItem(pii_text)
-            self.table.setItem(row, 3, pii_item)
-            
-            # Set row colors for better visibility (alternating)
-            for col in range(self.table.columnCount()):
-                cell = self.table.item(row, col)
-                if cell:
-                    if row % 2 == 0:
-                        cell.setBackground(QColor("#f5f5f5"))
-                    else:
-                        cell.setBackground(QColor("#ffffff"))
-            
-        # Adjust columns and row heights for better visibility
-        self.table.resizeColumnsToContents()
-        self.table.resizeRowsToContents()
-        
-        # Set minimum and maximum column widths
-        for col in range(self.table.columnCount()):
-            width = self.table.columnWidth(col)
-            if col == 0:  # ID column
-                self.table.setColumnWidth(col, min(200, max(100, width)))
-            elif col == 3:  # PII preview column
-                self.table.setColumnWidth(col, min(400, max(200, width)))
-            else:
-                self.table.setColumnWidth(col, min(200, max(100, width)))
+    
         
     def display_item_details(self, item):
         """
@@ -1203,20 +1150,121 @@ class EnhancedDataDialog(QDialog):
         
         self.logger.info(f"Copied data to clipboard: {str(data)[:30]}...")
 
-    
+    def populate_table(self):
+        """
+        Populate the table with filtered data using improved styling and formatting.
+        This method ensures consistent appearance and optimal readability.
+        """
+        # Check if table exists
+        if not hasattr(self, 'table') or self.table is None:
+            return
         
+        try:
+            # Import the StandardTheme for consistent styling
+            from UI.Desktop.standard_theme import StandardTheme
+        except ImportError:
+            # If import fails, use a local reference to colors
+            class StandardTheme:
+                PRIMARY = "#1976D2"
+                PRIMARY_LIGHT = "#BBDEFB"
+                GRAY_100 = "#F5F5F5"
+                GRAY_300 = "#E0E0E0"
+                GRAY_400 = "#BDBDBD"
+                TEXT_PRIMARY = "#212121"
+                BG_DEFAULT = "#FFFFFF"
+        
+        # Clear existing rows
+        self.table.setRowCount(0)
+        
+        if not self.filtered_data:
+            return
+        
+        # Apply standardized styling to table
+        self.table.setStyleSheet("""
+            QTableWidget {
+                gridline-color: """ + StandardTheme.GRAY_300 + """;
+                border: 1px solid """ + StandardTheme.GRAY_300 + """;
+                border-radius: 4px;
+                selection-background-color: """ + StandardTheme.PRIMARY_LIGHT + """;
+                selection-color: """ + StandardTheme.TEXT_PRIMARY + """;
+                alternate-background-color: """ + StandardTheme.GRAY_100 + """;
+            }
+            QHeaderView::section {
+                background-color: """ + StandardTheme.PRIMARY_LIGHT + """;
+                padding: 6px;
+                border: 1px solid """ + StandardTheme.GRAY_300 + """;
+                font-weight: bold;
+                color: """ + StandardTheme.PRIMARY + """;
+            }
+            QTableWidget::item {
+                padding: 6px;
+            }
+            QTableWidget::item:selected {
+                color: """ + StandardTheme.TEXT_PRIMARY + """;
+            }
+        """)
+        
+        # Configure for alternating row colors
+        self.table.setAlternatingRowColors(True)
+        
+        # Add data with improved styling
+        for row, item in enumerate(self.filtered_data):
+            self.table.insertRow(row)
+            
+            # ID column with monospace font for better readability
+            id_item = QTableWidgetItem(item.get('_id', ''))
+            id_item.setTextAlignment(Qt.AlignCenter)
+            id_item.setFont(QFont("Monospace"))
+            self.table.setItem(row, 0, id_item)
+            
+            # Category column
+            category_item = QTableWidgetItem(item.get('Category', ''))
+            category_item.setTextAlignment(Qt.AlignCenter)
+            category_item.setFont(QFont("", -1, QFont.Bold))
+            self.table.setItem(row, 1, category_item)
+            
+            # Type column
+            type_item = QTableWidgetItem(item.get('Type', ''))
+            type_item.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(row, 2, type_item)
+            
+            # PII Data preview with enhanced formatting
+            pii_text = self.get_pii_preview(item.get('PII', ''))
+            pii_item = QTableWidgetItem(pii_text)
+            self.table.setItem(row, 3, pii_item)
+        
+        # Optimize column widths
+        self.table.resizeColumnsToContents()
+        
+        # Ensure columns are not too narrow or too wide
+        header = self.table.horizontalHeader()
+        
+        # Set minimum and maximum column widths
+        min_widths = [120, 100, 100, 200]  # ID, Category, Type, PII
+        max_widths = [200, 200, 200, 400]  # ID, Category, Type, PII
+        
+        for col in range(min(self.table.columnCount(), len(min_widths))):
+            width = header.sectionSize(col)
+            width = max(width, min_widths[col])
+            width = min(width, max_widths[col])
+            header.resizeSection(col, width)
+        
+        # Allow PII column to stretch
+        header.setSectionResizeMode(3, QHeaderView.Stretch)
+
+
     def get_pii_preview(self, pii_data):
         """
-        Get an enhanced preview of PII data for table display.
+        Get an enhanced preview of PII data for table display with improved formatting.
         
         Args:
             pii_data: PII data to preview
             
         Returns:
-            str: Preview text with formatting
+            str: Enhanced preview text with better formatting
         """
         try:
-            # If it's a string, try to parse it as JSON or list of dicts
+            # If it's a string, try to parse it as structured data
             if isinstance(pii_data, str):
                 try:
                     parsed_data = ast.literal_eval(pii_data)
@@ -1225,46 +1273,121 @@ class EnhancedDataDialog(QDialog):
                         # Count total items
                         item_count = len(parsed_data)
                         
-                        # Show first few items
-                        items = []
-                        for item in parsed_data[:3]:
+                        # Show first few items with better formatting
+                        preview_items = []
+                        max_preview_items = min(item_count, 3)  # Show up to 3 items
+                        
+                        for i, item in enumerate(parsed_data[:max_preview_items]):
                             if isinstance(item, dict) and 'Item Name' in item and 'Data' in item:
+                                # Format: "Item Name: Data" with length limits
+                                item_name = item['Item Name']
+                                item_data = str(item['Data'])
+                                
                                 # Limit data length for preview
-                                data_preview = str(item['Data'])
-                                if len(data_preview) > 30:
-                                    data_preview = data_preview[:30] + "..."
-                                items.append(f"{item['Item Name']}: {data_preview}")
+                                if len(item_data) > 30:
+                                    item_data = item_data[:27] + "..."
+                                    
+                                preview_items.append(f"{item_name}: {item_data}")
                             else:
-                                # Limit string length for preview
+                                # Handle non-standard items
                                 item_str = str(item)
                                 if len(item_str) > 30:
-                                    item_str = item_str[:30] + "..."
-                                items.append(item_str)
-                                
-                        # Add count to preview if there are more items
-                        preview = ", ".join(items)
-                        if item_count > 3:
-                            preview += f" ... ({item_count} items total)"
-                                
-                        return preview
+                                    item_str = item_str[:27] + "..."
+                                preview_items.append(item_str)
+                        
+                        # Format the preview with bullet points
+                        formatted_preview = ""
+                        for i, preview in enumerate(preview_items):
+                            formatted_preview += f"• {preview}\n"
+                        
+                        # Add count if there are more items
+                        if item_count > max_preview_items:
+                            additional = item_count - max_preview_items
+                            formatted_preview += f"(+ {additional} more item{'s' if additional != 1 else ''})"
+                        
+                        return formatted_preview.strip()
+                    elif isinstance(parsed_data, dict):
+                        # For dictionaries, show key-value pairs
+                        preview_items = []
+                        for k, v in list(parsed_data.items())[:3]:  # Show up to 3 key-value pairs
+                            v_str = str(v)
+                            if len(v_str) > 30:
+                                v_str = v_str[:27] + "..."
+                            preview_items.append(f"{k}: {v_str}")
+                        
+                        # Format with bullet points
+                        formatted_preview = ""
+                        for i, preview in enumerate(preview_items):
+                            formatted_preview += f"• {preview}\n"
+                        
+                        # Add indicator if there are more items
+                        if len(parsed_data) > 3:
+                            additional = len(parsed_data) - 3
+                            formatted_preview += f"(+ {additional} more key{'s' if additional != 1 else ''})"
+                        
+                        return formatted_preview.strip()
                     else:
-                        return str(parsed_data)
+                        # For other types, just convert to string
+                        result = str(parsed_data)
+                        if len(result) > 100:
+                            result = result[:97] + "..."
+                        return result
                 except (SyntaxError, ValueError):
-                    # If parsing fails, just return the string
-                    if len(pii_data) > 50:
-                        return pii_data[:50] + "..."
+                    # If parsing fails, just return the string with length limit
+                    if len(pii_data) > 100:
+                        return pii_data[:97] + "..."
                     return pii_data
-            
-            # For other types, convert to string
-            if len(str(pii_data)) > 50:
-                return str(pii_data)[:50] + "..."
-            return str(pii_data)
+            elif isinstance(pii_data, dict):
+                # For dictionaries, show key-value pairs
+                preview_items = []
+                for k, v in list(pii_data.items())[:3]:  # Show up to 3 key-value pairs
+                    v_str = str(v)
+                    if len(v_str) > 30:
+                        v_str = v_str[:27] + "..."
+                    preview_items.append(f"{k}: {v_str}")
                 
+                # Format with bullet points
+                formatted_preview = ""
+                for i, preview in enumerate(preview_items):
+                    formatted_preview += f"• {preview}\n"
+                
+                # Add indicator if there are more items
+                if len(pii_data) > 3:
+                    additional = len(pii_data) - 3
+                    formatted_preview += f"(+ {additional} more key{'s' if additional != 1 else ''})"
+                
+                return formatted_preview.strip()
+            elif isinstance(pii_data, list):
+                # Format list items
+                preview_items = []
+                max_items = min(len(pii_data), 3)
+                
+                for i in range(max_items):
+                    item_str = str(pii_data[i])
+                    if len(item_str) > 30:
+                        item_str = item_str[:27] + "..."
+                    preview_items.append(item_str)
+                
+                # Format with bullet points
+                formatted_preview = ""
+                for i, preview in enumerate(preview_items):
+                    formatted_preview += f"• {preview}\n"
+                
+                # Add count if there are more items
+                if len(pii_data) > max_items:
+                    additional = len(pii_data) - max_items
+                    formatted_preview += f"(+ {additional} more item{'s' if additional != 1 else ''})"
+                
+                return formatted_preview.strip()
+            else:
+                # For other types, just convert to string with length limit
+                result = str(pii_data)
+                if len(result) > 100:
+                    result = result[:97] + "..."
+                return result
         except Exception as e:
-            self.logger.error(f"Error generating PII preview: {str(e)}")
-            return "Error: Could not preview data"
-            
-   
+            # In case of errors, return a safe fallback
+            return f"Preview unavailable ({type(pii_data).__name__})"
         
     def clear_pii_fields(self):
         """Clear all PII fields."""
@@ -2141,3 +2264,309 @@ class EnhancedDataDialog(QDialog):
         
         # Clear current item
         self.current_item = None
+    
+    def apply_filters(self):
+        """
+        Apply filters to the data with advanced search capabilities and robust error handling.
+        Supports multi-term search, category and type filtering with real-time feedback.
+        """
+        if not self.data:
+            return
+        
+        try:
+            # Import the StandardTheme for consistent styling
+            from UI.Desktop.standard_theme import StandardTheme
+        except ImportError:
+            # If import fails, use a local reference to colors
+            class StandardTheme:
+                PRIMARY = "#1976D2"
+                SUCCESS = "#4CAF50"
+                SUCCESS_LIGHT = "#E8F5E9" 
+                DANGER = "#F44336"
+                DANGER_LIGHT = "#FFEBEE"
+                WARNING = "#FF9800"
+                WARNING_LIGHT = "#FFF3E0"
+                TEXT_PRIMARY = "#212121"
+                
+        # Get filter values safely with defaults
+        category = "All Categories"
+        type_ = "All Types" 
+        search_text = ""
+        
+        try:
+            category = self.category_filter.currentText()
+        except (RuntimeError, AttributeError):
+            pass
+            
+        try:
+            type_ = self.type_filter.currentText()
+        except (RuntimeError, AttributeError):
+            pass
+            
+        try:
+            search_text = self.search_input.text().lower().strip()
+        except (RuntimeError, AttributeError):
+            pass
+        
+        # Measure performance
+        start_time = time.time()
+        
+        # Apply filters efficiently
+        # Pre-check if we need to filter at all to avoid unnecessary processing
+        if category == "All Categories" and type_ == "All Types" and not search_text:
+            self.filtered_data = self.data.copy() if hasattr(self.data, 'copy') else list(self.data)
+        else:
+            # Apply filters in order of expected efficiency (most restrictive first)
+            filtered_data = []
+            
+            for item in self.data:
+                # Apply category filter (fast exact match)
+                if category != "All Categories" and item.get('Category', '') != category:
+                    continue
+                    
+                # Apply type filter (fast exact match)
+                if type_ != "All Types" and item.get('Type', '') != type_:
+                    continue
+                    
+                # Apply search filter (more intensive)
+                if search_text:
+                    # Split into terms for multi-term search
+                    search_terms = search_text.split()
+                    
+                    # Check if ALL terms are found in ANY field
+                    found_all_terms = True
+                    
+                    for term in search_terms:
+                        term_found = False
+                        
+                        # Check in all item fields
+                        for key, value in item.items():
+                            if term in str(value).lower():
+                                term_found = True
+                                break
+                        
+                        # If any term isn't found, this item doesn't match
+                        if not term_found:
+                            found_all_terms = False
+                            break
+                    
+                    if not found_all_terms:
+                        continue
+                
+                # If we get here, the item passed all filters
+                filtered_data.append(item)
+            
+            self.filtered_data = filtered_data
+        
+        # Calculate filter time for optimization
+        filter_time = time.time() - start_time
+        
+        # Log performance if it's slow
+        if filter_time > 0.1:  # Only log if filtering took more than 100ms
+            try:
+                if hasattr(self, 'update_log'):
+                    timestamp = QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
+                    if hasattr(self, 'assistant') and self.assistant:
+                        timestamp = self.assistant.get_current_time()
+                    
+                    self.update_log(
+                        timestamp,
+                        f"Filter applied in {filter_time:.3f}s ({len(self.filtered_data)} of {len(self.data)} items)"
+                    )
+            except:
+                pass
+        
+        # Update UI to reflect filter results
+        try:
+            if hasattr(self, 'data_count_label') and self.data_count_label is not None:
+                total_count = len(self.data)
+                filtered_count = len(self.filtered_data)
+                
+                # Use more descriptive message
+                if filtered_count == 0:
+                    self.data_count_label.setText(f"No items match the current filters (from {total_count} total)")
+                    self.data_count_label.setStyleSheet(f"""
+                        font-weight: bold;
+                        color: {StandardTheme.DANGER};
+                        padding: 5px;
+                        background-color: {StandardTheme.DANGER_LIGHT};
+                        border-radius: 4px;
+                        margin: 5px 0;
+                    """)
+                elif filtered_count == total_count:
+                    self.data_count_label.setText(f"Showing all {total_count} items")
+                    self.data_count_label.setStyleSheet(f"""
+                        font-weight: bold;
+                        color: {StandardTheme.SUCCESS};
+                        padding: 5px;
+                        background-color: {StandardTheme.SUCCESS_LIGHT};
+                        border-radius: 4px;
+                        margin: 5px 0;
+                    """)
+                else:
+                    percent = (filtered_count / total_count) * 100
+                    self.data_count_label.setText(
+                        f"Filtered: {filtered_count} of {total_count} items ({percent:.1f}%)"
+                    )
+                    self.data_count_label.setStyleSheet(f"""
+                        font-weight: bold;
+                        color: {StandardTheme.WARNING};
+                        padding: 5px;
+                        background-color: {StandardTheme.WARNING_LIGHT};
+                        border-radius: 4px;
+                        margin: 5px 0;
+                    """)
+        except (RuntimeError, AttributeError):
+            pass
+                    
+        # Update table with filtered data
+        try:
+            self.populate_table()
+        except (RuntimeError, AttributeError):
+            pass
+        
+        # Update status message with more details
+        try:
+            if hasattr(self, 'status_label') and self.status_label is not None:
+                if self.filtered_data:
+                    # Count how many categories and types are represented in the filtered data
+                    categories = set(item.get('Category', '') for item in self.filtered_data)
+                    types = set(item.get('Type', '') for item in self.filtered_data)
+                    
+                    # Also count total PII fields
+                    total_pii_count = 0
+                    for item in self.filtered_data:
+                        pii_data = item.get('PII', '')
+                        try:
+                            if isinstance(pii_data, str):
+                                parsed = ast.literal_eval(pii_data)
+                                if isinstance(parsed, list):
+                                    total_pii_count += len(parsed)
+                        except (SyntaxError, ValueError):
+                            # Skip parsing errors
+                            pass
+                    
+                    status_text = (
+                        f"Found {len(self.filtered_data)} items in {len(categories)} "
+                        f"{'category' if len(categories) == 1 else 'categories'} with "
+                        f"{len(types)} {'type' if len(types) == 1 else 'types'}, "
+                        f"containing ~{total_pii_count} PII fields"
+                    )
+                    
+                    # Add search term info if searching
+                    if search_text:
+                        search_terms = search_text.split()
+                        if len(search_terms) > 1:
+                            status_text += f" (matched {len(search_terms)} search terms)"
+                    
+                    self.status_label.setText(status_text)
+                    self.status_label.setStyleSheet(f"color: {StandardTheme.TEXT_PRIMARY}; font-style: italic;")
+                else:
+                    search_hint = ""
+                    if search_text:
+                        search_hint = " Try using fewer or more general search terms."
+                        
+                    self.status_label.setText(
+                        f"No items match the current filters.{search_hint} Try adjusting your criteria."
+                    )
+                    self.status_label.setStyleSheet(f"color: {StandardTheme.DANGER}; font-weight: bold;")
+        except (RuntimeError, AttributeError):
+            pass
+
+
+    def update_filters(self):
+        """
+        Update filter dropdowns with available options, ensuring filters work correctly.
+        This method rebuilds the filter lists while preserving selections when possible.
+        """
+        if not self.data:
+            return
+                    
+        # Save current selections only if widgets are still valid
+        try:
+            current_category = self.category_filter.currentText()
+        except (RuntimeError, AttributeError):
+            current_category = "All Categories"
+                
+        try:
+            current_type = self.type_filter.currentText()
+        except (RuntimeError, AttributeError):
+            current_type = "All Types"
+        
+        # Get unique categories and types with counts
+        categories = {}
+        types = {}
+        
+        for item in self.data:
+            category = item.get('Category', '')
+            type_ = item.get('Type', '')
+            
+            if category:
+                categories[category] = categories.get(category, 0) + 1
+            if type_:
+                types[type_] = types.get(type_, 0) + 1
+        
+        # Check if widgets are still valid before updating
+        try:
+            # Clear and repopulate category filter
+            self.category_filter.blockSignals(True)  # Block signals to prevent multiple updates
+            self.category_filter.clear()
+            self.category_filter.addItem("All Categories")
+            
+            # Add categories with counts
+            for category, count in sorted(categories.items()):
+                self.category_filter.addItem(f"{category} ({count})")
+            
+            # Restore previous selection or close match
+            if current_category != "All Categories":
+                # First try exact match
+                index = self.category_filter.findText(current_category)
+                if index < 0:
+                    # Try match without the count
+                    base_category = current_category.split(" (")[0]
+                    for i in range(self.category_filter.count()):
+                        item_text = self.category_filter.itemText(i)
+                        if item_text.startswith(base_category + " ("):
+                            index = i
+                            break
+                
+                if index >= 0:
+                    self.category_filter.setCurrentIndex(index)
+                else:
+                    self.category_filter.setCurrentIndex(0)  # Default to "All"
+            
+            self.category_filter.blockSignals(False)  # Unblock signals
+        except (RuntimeError, AttributeError):
+            pass
+        
+        try:
+            # Clear and repopulate type filter
+            self.type_filter.blockSignals(True)  # Block signals to prevent multiple updates
+            self.type_filter.clear()
+            self.type_filter.addItem("All Types")
+            
+            # Add types with counts
+            for type_, count in sorted(types.items()):
+                self.type_filter.addItem(f"{type_} ({count})")
+            
+            # Restore previous selection or close match
+            if current_type != "All Types":
+                # First try exact match
+                index = self.type_filter.findText(current_type)
+                if index < 0:
+                    # Try match without the count
+                    base_type = current_type.split(" (")[0]
+                    for i in range(self.type_filter.count()):
+                        item_text = self.type_filter.itemText(i)
+                        if item_text.startswith(base_type + " ("):
+                            index = i
+                            break
+                
+                if index >= 0:
+                    self.type_filter.setCurrentIndex(index)
+                else:
+                    self.type_filter.setCurrentIndex(0)  # Default to "All"
+            
+            self.type_filter.blockSignals(False)  # Unblock signals
+        except (RuntimeError, AttributeError):
+            pass

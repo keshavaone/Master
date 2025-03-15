@@ -26,7 +26,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QTableWidget,
     QHeaderView, QTableWidgetItem, QDialog, QScrollArea, QSizePolicy,
     QAbstractItemView, QApplication, QMenu, QAction, QTabWidget,
-    QProgressBar, QStatusBar, QStyle
+    QProgressBar, QStatusBar, QProgressDialog
 )
 from UI.Desktop.session_manager import SessionManager
 from API.auth_service import EnhancedAuthService as AuthService
