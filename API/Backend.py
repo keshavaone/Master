@@ -27,6 +27,7 @@ class Agent:
     s3: str
     file_name: str
     input_path: str = 'ReQuest.txt'
+    session_token: str = None
     stored_file_names: list[str] = field(default_factory=list)
 
     def __post_init__(self):
@@ -37,6 +38,7 @@ class Agent:
 
         self.status = {'Waking Up Mr.Agent...'}
         try:
+            # Get secrets
             self.__secret = ast.literal_eval(get_secret())
             print('Secrets Fetched')
 
@@ -45,7 +47,14 @@ class Agent:
             table_name = "myPII"
             self.collection = dynamodb.Table(table_name)
             self.__df = self.refresh_data()
-            self.fetch_my_key()
+
+            # Initialize KMS - ensure we're using the original key fetching method
+            # that was working before
+            self.__encoded_key = self.__secret['KMS_KEY_ID']
+            assert self.__encoded_key is not None, "KMS key not found in secrets"
+            self.kms_client = KMS()
+            self.cipher_suite = self.kms_client.decrypt_my_key(self.__encoded_key)
+            print('KMS Key Decrypted Successfully')
 
             # Register cleanup handler
             atexit.register(self.end_work)
@@ -53,6 +62,10 @@ class Agent:
         except Exception as e:
             print(f"Error in agent initialization: {e}")
             raise
+    
+    def validate_session(self):
+        """Validate the session token."""
+        return bool(self.session_token)
 
     def fetch_my_key(self):
         """
@@ -236,8 +249,7 @@ class Agent:
             dict: Update response
         """
         print(item)
-        updated_values = {"PII": base64.b64encode(
-            self.cipher_suite.encrypt(item['PII'].encode('utf-8'))).decode('utf-8')}
+        updated_values = {"PII": self.kms_client.encrypt_to_base64(item['PII'])}
         print(item)
         item_id = item['_id']
         update_expression = "SET " + \
@@ -455,9 +467,18 @@ class Agent:
         Returns:
             str: Decrypted data
         """
-        if self.kms_client and data:
-            return self.kms_client.decrypt_data(data)
-        return None
+        try:
+            if hasattr(self, 'kms_client') and self.kms_client and data:
+                print(f"Attempting to decrypt data of length: {len(data)}")
+                decrypted = self.kms_client.decrypt_data(data)
+                print(f"Data decryption successful: {bool(decrypted)}")
+                return decrypted
+            else:
+                print("Unable to decrypt: missing KMS client or data")
+            return None
+        except Exception as e:
+            print(f"Error in decrypt_data: {e}")
+            return None
 
     def end_work(self):
         """Clean up resources when the agent is terminated."""

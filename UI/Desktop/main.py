@@ -17,9 +17,7 @@ import json
 import logging
 import hashlib
 import subprocess
-import threading
 from logging.handlers import RotatingFileHandler
-from UI.Desktop.session_manager import SessionManager
 
 # Third-party imports
 import pandas as pd
@@ -28,8 +26,10 @@ from PyQt5.QtWidgets import (
     QLineEdit, QMessageBox, QInputDialog, QMainWindow, QWidget,
     QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QTableWidget,
     QHeaderView, QTableWidgetItem, QDialog, QScrollArea, QSizePolicy,
-    QAbstractItemView, QApplication, QMenu, QAction, QTabWidget
+    QAbstractItemView, QApplication, QMenu, QAction, QTabWidget,
+    QProgressBar, QStatusBar
 )
+from UI.Desktop.session_manager import SessionManager
 from PyQt5.QtGui import QIcon, QCursor, QGuiApplication
 from PyQt5.QtCore import Qt, QTimer, QDateTime
 
@@ -53,6 +53,7 @@ class PIIWindow(QMainWindow):
     including authentication, data display, and CRUD operations.
     """
 
+    # Update the __init__ method to initialize session manager and status bar:
     def __init__(self):
         """Initialize the main window and UI components."""
         super().__init__()
@@ -83,10 +84,10 @@ class PIIWindow(QMainWindow):
         self.timer = None
         self.start_time = None
         
-        self.session_manager = SessionManager(self, token_ttl=3600)  # 1 hour session
-        self.session_manager.session_expired.connect(self.handle_session_expired)
-        self.session_manager.token_refreshed.connect(self.handle_token_refreshed)
-
+        # Initialize session manager and status bar
+        self.setup_session_manager()
+        self.setup_status_bar()
+            
         # Set up UI
         self.ui_components()
         self.show()
@@ -94,7 +95,7 @@ class PIIWindow(QMainWindow):
 
         # Connect the close event to the cleanup function
         self.close_event = self.cleanup_on_exit
-
+        
     def ui_components(self):
         """Initialize and set up the UI components."""
         central_widget = QWidget()
@@ -139,6 +140,16 @@ class PIIWindow(QMainWindow):
         self.password_input.setHidden(True)
         pii_layout.addWidget(self.password_input)
 
+        # SSO Login button (initially hidden)
+        self.btn_sso_login = QPushButton('AWS SSO Login', self)
+        self.btn_sso_login.setCursor(QCursor(Qt.PointingHandCursor))
+        self.btn_sso_login.setStyleSheet(
+            "background-color: #0066CC; color: white;"
+        )
+        self.btn_sso_login.clicked.connect(self.authenticate_with_sso)
+        self.btn_sso_login.setVisible(False)
+        pii_layout.addWidget(self.btn_sso_login)
+
         # Data table
         self.data_table = self.set_table(columncount=1, hlabels=['Item Name'])
         self.data_table.itemSelectionChanged.connect(
@@ -174,14 +185,18 @@ class PIIWindow(QMainWindow):
             self.add_new_entry
         )
         button_layout.addWidget(self.btn_add_entry)
-        # Add this in your ui_components method, right after initializing other buttons
-        self.btn_sso_login = QPushButton('AWS SSO Login', self)
-        self.btn_sso_login.setCursor(QCursor(Qt.PointingHandCursor))
-        self.btn_sso_login.setStyleSheet(
-            "background-color: #0066CC; color: white;"
+
+        # Session info button
+        self.btn_session_info = QPushButton('Session Info', self)
+        self.btn_session_info.setCursor(QCursor(Qt.PointingHandCursor))
+        self.btn_session_info.setStyleSheet(
+            "background-color: #4682B4; color: white;"
         )
-        self.btn_sso_login.clicked.connect(self.authenticate_with_sso)
-        self.btn_sso_login.setVisible(False)
+        self.btn_session_info.clicked.connect(self.show_session_info)
+        self.btn_session_info.setToolTip('View current session information')
+        self.btn_session_info.setVisible(False)
+        button_layout.addWidget(self.btn_session_info)
+        
         button_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         pii_layout.addLayout(button_layout)
         
@@ -189,14 +204,15 @@ class PIIWindow(QMainWindow):
         self.tab_widget.addTab(self.pii_tab, "PII Data Management")
         
         # Create and add YouTube Downloader tab
-        self.downloader_widget = YouTubeDownloaderWidget(
-            parent=self,
-            log_callback=lambda msg: self.update_log(
-                self.assistant.get_current_time() if hasattr(self, 'assistant') and self.assistant is not None else 
-                QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
-                f"YouTube Downloader: {msg}"
-            ) if hasattr(self, 'update_log') else None
-        )
+        if not hasattr(self, 'downloader_widget'):
+            self.downloader_widget = YouTubeDownloaderWidget(
+                parent=self,
+                log_callback=lambda msg: self.update_log(
+                    self.assistant.get_current_time() if hasattr(self, 'assistant') and self.assistant is not None else 
+                    QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
+                    f"YouTube Downloader: {msg}"
+                ) if hasattr(self, 'update_log') else None
+            )
         
         # Add YouTube downloader tab
         self.tab_widget.addTab(self.downloader_widget, "YouTube Downloader")
@@ -554,15 +570,13 @@ class PIIWindow(QMainWindow):
             )
 
     def show_password_input(self):
-        """Show password input and SSO login option for authentication."""
+        """Show password input for authentication."""
         self.btn_connect_server.setText('Authenticating...')
         self.btn_connect_server.setDisabled(True)
         self.btn_connect_server.setStyleSheet(
             "background-color: gray; color: white;"
         )
         self.password_input.setHidden(False)  # Make the password input visible
-        if hasattr(self, 'btn_sso_login'):  # Check if attribute exists
-            self.btn_sso_login.setVisible(True)   # Make the SSO login button visible
         self.password_input.setFocus()
         self.btn_connect_server.clicked.disconnect(self.show_password_input)
         self.btn_connect_server.clicked.connect(self.authenticate_and_connect)
@@ -1044,6 +1058,11 @@ class PIIWindow(QMainWindow):
         """Connect to the backend server and set up the interface."""
         self.btn_connect_server.setDisabled(True)
         try:
+            # Get session token from session manager
+            if not hasattr(self, 'session_manager') or not self.session_manager.session_token:
+                raise ValueError("No valid session token available")
+                
+            # Create agent with session token
             self.agent = Agent(
                 s3=CONSTANTS.AWS_S3,
                 file_name=CONSTANTS.AWS_FILE
@@ -1071,6 +1090,9 @@ class PIIWindow(QMainWindow):
             self.btn_connect_server.setToolTip(
                 'You are Connected Successfully. Button Disabled'
             )
+            
+            # Show session info button
+            self.btn_session_info.setVisible(True)
 
             # Create logout button
             self.create_logout_button()
@@ -1085,19 +1107,18 @@ class PIIWindow(QMainWindow):
             if data is not None:
                 self.populate_data_table(data)
 
+            # Update session display
+            self.update_session_status()
+
             # Log successful connection
-            self.update_log(
-                self.assistant.get_current_time(),
-                "Connected to Server."
-            )
-            self.update_log(
-                self.assistant.get_current_time(),
-                'Display Data Button: Activated'
-            )
-            self.update_log(
-                self.assistant.get_current_time(),
-                'Add New Entry Button: Activated'
-            )
+            timestamp = self.assistant.get_current_time()
+            self.update_log(timestamp, "Connected to Server.")
+            self.update_log(timestamp, 'Display Data Button: Activated')
+            self.update_log(timestamp, 'Add New Entry Button: Activated')
+            
+            # Switch to PII tab
+            self.tab_widget.setCurrentIndex(0)
+            
         except Exception as e:
             QMessageBox.critical(
                 self,
@@ -1110,25 +1131,62 @@ class PIIWindow(QMainWindow):
                 self.authenticate_and_connect
             )
             self.btn_connect_server.clicked.connect(self.show_password_input)
+            
+            # Logout from session manager
+            if hasattr(self, 'session_manager'):
+                self.session_manager.logout()
 
     def create_logout_button(self):
         """Create and position the logout button."""
-        self.btn_logout = QPushButton('LogOut', self)
+        # Create button container in the top right corner
+        button_container = QWidget(self)
+        button_layout = QHBoxLayout(button_container)
+        button_layout.setContentsMargins(0, 0, 10, 0)  # Right margin of 10
+        
+        # Session info button
+        if hasattr(self, 'btn_session_info'):
+            self.btn_session_info.setParent(button_container)
+            button_layout.addWidget(self.btn_session_info)
+        else:
+            self.btn_session_info = QPushButton('Session Info', button_container)
+            self.btn_session_info.setCursor(QCursor(Qt.PointingHandCursor))
+            self.btn_session_info.clicked.connect(self.show_session_info)
+            self.btn_session_info.setShortcut("Ctrl+I")
+            self.btn_session_info.setStyleSheet(
+                "background-color: #4682B4; color: white;"
+            )
+            self.btn_session_info.setToolTip('View session information')
+            button_layout.addWidget(self.btn_session_info)
+        
+        # Logout button
+        self.btn_logout = QPushButton('Logout', button_container)
         self.btn_logout.setCursor(QCursor(Qt.PointingHandCursor))
         self.btn_logout.clicked.connect(self.logout_user)
         self.btn_logout.setShortcut("Ctrl+W")
-        self.btn_logout.resize(100, 40)
-        self.btn_logout.show()
         self.btn_logout.setStyleSheet(
             "background-color: orange; color: white;"
         )
-        self.btn_logout.setDisabled(False)
         self.btn_logout.setToolTip('Click to Logout')
-        # Position the logout to right side corner in the Top Right Corner
-        self.btn_logout.move(
-            self.width() - self.btn_logout.width() - 10,
-            10
+        button_layout.addWidget(self.btn_logout)
+        
+        # Position button container in top right
+        button_container.setGeometry(
+            self.width() - 230, 10, 220, 50
         )
+        button_container.show()
+
+    def show_password_input(self):
+        """Show password input and SSO login option for authentication."""
+        self.btn_connect_server.setText('Authenticating...')
+        self.btn_connect_server.setDisabled(True)
+        self.btn_connect_server.setStyleSheet(
+            "background-color: gray; color: white;"
+        )
+        self.password_input.setHidden(False)  # Make password input visible
+        self.btn_sso_login.setVisible(True)   # Make SSO login button visible
+        self.password_input.setFocus()
+        self.btn_connect_server.clicked.disconnect(self.show_password_input)
+        self.btn_connect_server.clicked.connect(self.authenticate_and_connect)
 
     def on_data_table_selection(self):
         """Handle selection in the data table to show sub-options."""
@@ -1369,6 +1427,12 @@ class PIIWindow(QMainWindow):
             task_time (str): Timestamp for the log
             task_name (str): Task name/description
         """
+        # Check if log_table exists
+        if not hasattr(self, 'log_table') or self.log_table is None:
+            # Just log to file without updating the table
+            logging.info("%s - %s", task_time, task_name)
+            return
+
         row_position = self.log_table.rowCount()
         self.log_table.insertRow(row_position)
 
@@ -1592,28 +1656,130 @@ class PIIWindow(QMainWindow):
 
         if event:
             event.accept()
+        
+    def setup_session_manager(self):
+        """Set up the session manager and connect signals."""
+        # Create session manager with 1-hour session timeout
+        self.session_manager = SessionManager(self, token_ttl=3600)  # 1 hour session
+        
+        # Connect signals
+        self.session_manager.session_expired.connect(self.handle_session_expired)
+        self.session_manager.token_refreshed.connect(self.handle_token_refreshed)
+        self.session_manager.session_expiring_soon.connect(self.handle_session_expiring_soon)
+        
+        # Log initialization
+        if hasattr(self, 'update_log'):
+            timestamp = QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
+            self.update_log(timestamp, "Session manager initialized")
+
+    def setup_status_bar(self):
+        """Set up status bar with session information."""
+        # Create status bar
+        self.statusBar = QStatusBar()
+        self.setStatusBar(self.statusBar)
+        
+        # Add session timer display
+        self.session_timer_label = QLabel("Not logged in")
+        self.statusBar.addPermanentWidget(self.session_timer_label)
+        
+        # Add session type indicator
+        self.session_type_label = QLabel("")
+        self.statusBar.addPermanentWidget(self.session_type_label)
+        
+        # Set up timer to update status bar
+        self.status_timer = QTimer()
+        self.status_timer.timeout.connect(self.update_session_status)
+        self.status_timer.start(10000)  # Update every 10 seconds
+
+    def update_session_status(self):
+        """Update the session status display in the status bar."""
+        if not hasattr(self, 'session_manager') or not self.session_manager.is_authenticated:
+            self.session_timer_label.setText("Not logged in")
+            self.session_type_label.setText("")
+            return
+        
+        # Get session info
+        session_info = self.session_manager.get_session_info()
+        
+        # Update session time remaining
+        if session_info["remaining_seconds"] is not None:
+            self.session_timer_label.setText(f"Session: {session_info['remaining_formatted']} remaining")
             
+            # Set color based on remaining time
+            if session_info["remaining_seconds"] < 300:  # Less than 5 minutes
+                self.session_timer_label.setStyleSheet("color: red; font-weight: bold")
+            elif session_info["remaining_seconds"] < 600:  # Less than 10 minutes
+                self.session_timer_label.setStyleSheet("color: orange; font-weight: bold")
+            else:
+                self.session_timer_label.setStyleSheet("")
+        
+        # Update auth type indicator
+        auth_type = session_info["auth_type"]
+        if auth_type == "aws_sso":
+            self.session_type_label.setText("AWS SSO")
+            self.session_type_label.setStyleSheet("color: blue; font-weight: bold")
+        elif auth_type == "password":
+            self.session_type_label.setText("Password")
+            self.session_type_label.setStyleSheet("")
+
     def handle_session_expired(self):
         """Handle expired session."""
+        # Log the expiration
+        timestamp = QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
+        if hasattr(self, 'update_log'):
+            self.update_log(timestamp, "Session expired - logging out")
+        
         QMessageBox.warning(
             self,
             "Session Expired",
             "Your session has expired. Please log in again."
         )
+        
+        # Force logout
         self.logout_user()
 
     def handle_token_refreshed(self):
         """Handle token refresh event."""
+        if not hasattr(self, 'session_manager'):
+            return
+            
         session_info = self.session_manager.get_session_info()
-        self.update_log(
-            self.assistant.get_current_time() if self.assistant else 
-            QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
-            f"Session token refreshed. New expiration: {session_info['remaining_formatted']}"
+        
+        # Log the refresh
+        timestamp = QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
+        if hasattr(self, 'assistant') and self.assistant:
+            timestamp = self.assistant.get_current_time()
+            
+        if hasattr(self, 'update_log'):
+            self.update_log(
+                timestamp,
+                f"Session token refreshed. New expiration: {session_info['remaining_formatted']} from now"
+            )
+        
+        # Update status display
+        self.update_session_status()
+
+    def handle_session_expiring_soon(self, minutes_remaining):
+        """
+        Handle notification that session is expiring soon.
+        
+        Args:
+            minutes_remaining (int): Minutes until session expires
+        """
+        # Only notify if we're on the PII data tab (not YouTube downloader)
+        if not hasattr(self, 'tab_widget') or self.tab_widget.currentIndex() != 0:
+            return
+            
+        QMessageBox.information(
+            self,
+            "Session Expiring Soon",
+            f"Your session will expire in {minutes_remaining} minute{'s' if minutes_remaining != 1 else ''}.\n"
+            f"Please save your work. You will be logged out when the session expires."
         )
 
     def show_session_info(self):
         """Show current session information."""
-        if not self.session_manager.is_authenticated:
+        if not hasattr(self, 'session_manager') or not self.session_manager.is_authenticated:
             QMessageBox.information(
                 self,
                 "Session Info",
@@ -1626,12 +1792,15 @@ class PIIWindow(QMainWindow):
         QMessageBox.information(
             self,
             "Session Info",
+            f"User ID: {session_info['user_id']}\n"
             f"Authentication Type: {session_info['auth_type']}\n"
             f"Session Expires: {session_info['remaining_formatted']} from now\n"
             f"({session_info['expiration_time']})"
         )
 
-# Modify the authenticate_and_connect method:
+    ### Modifications for existing methods ###
+
+    # Update the authenticate_and_connect method:
     def authenticate_and_connect(self):
         """Authenticate user and connect to server."""
         password = self.password_input.text()
@@ -1661,11 +1830,15 @@ class PIIWindow(QMainWindow):
             self.password_input.setHidden(True)
             self.connect_to_server()
             
+            # Update session status in UI
+            self.update_session_status()
+            
+            # Log successful authentication
             session_info = self.session_manager.get_session_info()
+            timestamp = QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
             self.update_log(
-                self.assistant.get_current_time() if self.assistant else 
-                QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
-                f"Authentication Successful - Session valid for {session_info['remaining_formatted']}"
+                timestamp,
+                f"Password authentication successful - Session valid for {session_info['remaining_formatted']}"
             )
         else:
             QMessageBox.warning(
@@ -1681,35 +1854,69 @@ class PIIWindow(QMainWindow):
             )
             self.btn_connect_server.clicked.connect(self.show_password_input)
 
-# Modify the logout_user method:
+    # Update the authenticate_with_sso method:
+    def authenticate_with_sso(self):
+        """Authenticate using AWS SSO."""
+        self.btn_sso_login.setText('Authenticating with SSO...')
+        self.btn_sso_login.setDisabled(True)
+        
+        # Attempt AWS SSO authentication
+        auth_success = self.session_manager.authenticate_aws_sso(self)
+        
+        if auth_success:
+            # Connect to server
+            self.connect_to_server()
+            
+            # Update session status
+            self.update_session_status()
+            
+            # Log successful authentication
+            session_info = self.session_manager.get_session_info()
+            timestamp = QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
+            self.update_log(
+                timestamp,
+                f"AWS SSO authentication successful - Session valid for {session_info['remaining_formatted']}"
+            )
+        else:
+            # Reset button state
+            self.btn_sso_login.setText('AWS SSO Login')
+            self.btn_sso_login.setDisabled(False)
+
+    # Update the logout_user method:
     def logout_user(self):
         """Perform logout operations."""
         if not self.assistant:
             QMessageBox.warning(self, "Logout Error",
-                              "Not currently logged in.")
+                            "Not currently logged in.")
             return
 
-        self.update_log(self.assistant.get_current_time(), 'Logging Out...')
+        timestamp = self.assistant.get_current_time()
+        self.update_log(timestamp, 'Logging Out...')
         
         # Switch to YouTube downloader tab before logout
-        if hasattr(self, 'tab_widget'):
+        if hasattr(self, 'tab_widget') and hasattr(self, 'downloader_widget'):
             downloader_tab_index = self.tab_widget.indexOf(self.downloader_widget)
             self.tab_widget.setCurrentIndex(downloader_tab_index)
         
         self.ui_components()
-        self.update_log(
-            self.assistant.get_current_time(),
-            'Logged Out Successfully.'
-        )
+        self.update_log(timestamp, 'Logged Out Successfully.')
+        
+        # Cleanup
         self.cleanup_on_exit()
         self.modified = False
-        if self.btn_logout:
+        
+        # Hide logout button
+        if hasattr(self, 'btn_logout') and self.btn_logout:
             self.btn_logout.setVisible(False)
         
         # Logout from session manager
-        self.session_manager.logout()
+        if hasattr(self, 'session_manager'):
+            self.session_manager.logout()
+            self.update_session_status()
         
-        self.assistant.logout()
+        # Cleanup assistants
+        if hasattr(self, 'assistant') and self.assistant:
+            self.assistant.logout()
         self.agent = None
         
         # Switch to YouTube downloader tab again to ensure it's visible
@@ -1717,103 +1924,6 @@ class PIIWindow(QMainWindow):
             downloader_tab_index = self.tab_widget.indexOf(self.downloader_widget)
             self.tab_widget.setCurrentIndex(downloader_tab_index)
 
-# Add AWS SSO login option in the create_logout_button method:
-    def create_logout_button(self):
-        """Create and position the logout button."""
-        # Create button layout in the top right corner
-        button_layout = QHBoxLayout()
-        button_layout.setContentsMargins(0, 0, 10, 0)  # Right margin of 10
-        
-        # Session info button
-        self.btn_session_info = QPushButton('Session Info', self)
-        self.btn_session_info.setCursor(QCursor(Qt.PointingHandCursor))
-        self.btn_session_info.clicked.connect(self.show_session_info)
-        self.btn_session_info.setShortcut("Ctrl+I")
-        self.btn_session_info.resize(100, 40)
-        self.btn_session_info.setStyleSheet(
-            "background-color: #4682B4; color: white;"
-        )
-        self.btn_session_info.setToolTip('View session information')
-        button_layout.addWidget(self.btn_session_info)
-        
-        # Logout button
-        self.btn_logout = QPushButton('LogOut', self)
-        self.btn_logout.setCursor(QCursor(Qt.PointingHandCursor))
-        self.btn_logout.clicked.connect(self.logout_user)
-        self.btn_logout.setShortcut("Ctrl+W")
-        self.btn_logout.resize(100, 40)
-        self.btn_logout.setStyleSheet(
-            "background-color: orange; color: white;"
-        )
-        self.btn_logout.setToolTip('Click to Logout')
-        button_layout.addWidget(self.btn_logout)
-        
-        # Create a container widget for the buttons
-        container = QWidget(self)
-        container.setLayout(button_layout)
-        container.setGeometry(
-            self.width() - 230, 10, 220, 50
-        )
-        container.show()
-        
-        # Add AWS SSO option to connect dialog
-        self.btn_sso_login = QPushButton('AWS SSO Login', self)
-        self.btn_sso_login.setCursor(QCursor(Qt.PointingHandCursor))
-        self.btn_sso_login.setStyleSheet(
-            "background-color: #0066CC; color: white;"
-        )
-        self.btn_sso_login.clicked.connect(self.authenticate_with_sso)
-        self.btn_sso_login.setVisible(False)
-        
-        # Find the password input in the layout and add SSO button below it
-        for i in range(self.pii_tab.layout().count()):
-            item = self.pii_tab.layout().itemAt(i)
-            if item and item.widget() == self.password_input:
-                self.pii_tab.layout().insertWidget(i+1, self.btn_sso_login)
-                break
-
-# Add a new method for SSO authentication:
-    def authenticate_with_sso(self):
-        """Authenticate using AWS SSO."""
-        self.btn_sso_login.setText('Authenticating with SSO...')
-        self.btn_sso_login.setDisabled(True)
-        
-        # Start authentication in a separate thread to keep UI responsive
-        def auth_thread():
-            auth_success = self.session_manager.authenticate_aws_sso(self)
-            
-            # Update UI in main thread
-            if auth_success:
-                # Connect to server and update UI
-                QTimer.singleShot(0, lambda: self.connect_to_server())
-                
-                # Update session info in logs
-                session_info = self.session_manager.get_session_info()
-                QTimer.singleShot(0, lambda: self.update_log(
-                    QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
-                    f"AWS SSO Authentication Successful - Session valid for {session_info['remaining_formatted']}"
-                ))
-            else:
-                # Reset button state
-                QTimer.singleShot(0, lambda: self.btn_sso_login.setText('AWS SSO Login'))
-                QTimer.singleShot(0, lambda: self.btn_sso_login.setDisabled(False))
-        
-        # Start the thread
-        threading.Thread(target=auth_thread, daemon=True).start()
-
-# Modify the show_password_input method to also show the SSO login option:
-    def show_password_input(self):
-        """Show password input and SSO login option for authentication."""
-        self.btn_connect_server.setText('Authenticating...')
-        self.btn_connect_server.setDisabled(True)
-        self.btn_connect_server.setStyleSheet(
-            "background-color: gray; color: white;"
-        )
-        self.password_input.setHidden(False)  # Make the password input visible
-        self.btn_sso_login.setVisible(True)   # Make the SSO login button visible
-        self.password_input.setFocus()
-        self.btn_connect_server.clicked.disconnect(self.show_password_input)
-        self.btn_connect_server.clicked.connect(self.authenticate_and_connect)
 
 
 if __name__ == '__main__':
