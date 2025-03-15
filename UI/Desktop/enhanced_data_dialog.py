@@ -201,6 +201,7 @@ class EnhancedDataDialog(QDialog):
                 background-color: #2E7D32;
             }
         """)
+        self.refresh_btn.clicked.connect(self.fetch_data)
         
         # Add new button with improved styling
         self.add_btn = QPushButton("Add New Item")
@@ -223,11 +224,212 @@ class EnhancedDataDialog(QDialog):
         """)
         self.add_btn.clicked.connect(self.add_new_item)
         
+        # Download button with improved styling
+        self.download_btn = QPushButton("Download All Data")
+        self.download_btn.setIcon(self.style().standardIcon(QStyle.SP_ArrowDown))
+        self.download_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #9C27B0;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #7B1FA2;
+            }
+            QPushButton:pressed {
+                background-color: #6A1B9A;
+            }
+        """)
+        # Download button will be connected by the main window
+        
         # Add buttons to layout
         button_layout.addWidget(self.refresh_btn)
         button_layout.addWidget(self.add_btn)
+        button_layout.addWidget(self.download_btn)
         action_layout.addWidget(button_frame)
-    
+        
+        header_layout.addLayout(action_layout)
+        main_layout.addWidget(header_frame)
+        
+        # Data count label
+        self.data_count_label = QLabel("Loading data...")
+        self.data_count_label.setStyleSheet("""
+            font-weight: bold;
+            color: #0066cc;
+            padding: 5px;
+            background-color: #e6f2ff;
+            border-radius: 4px;
+            margin: 5px 0;
+        """)
+        main_layout.addWidget(self.data_count_label)
+        
+        # Table widget
+        self.table = QTableWidget()  # Initialize as self.table to match referenced attribute
+        self.table.setColumnCount(4)
+        self.table.setHorizontalHeaderLabels(['ID', 'Category', 'Type', 'PII Preview'])
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
+        self.table.setStyleSheet("""
+            QTableWidget {
+                gridline-color: #d0d0d0;
+                selection-background-color: #b3d9ff;
+                selection-color: black;
+            }
+            QHeaderView::section {
+                background-color: #f0f4f8;
+                padding: 5px;
+                font-weight: bold;
+                border: 1px solid #d0d0d0;
+                border-left: 0px;
+                border-top: 0px;
+            }
+            QTableWidget::item {
+                padding: 5px;
+            }
+        """)
+        self.table.setSortingEnabled(True)
+        self.table.itemSelectionChanged.connect(self.item_selected)
+        # Also create table_widget as an alias to self.table for backward compatibility
+        self.table_widget = self.table
+        
+        main_layout.addWidget(self.table, stretch=1)
+        
+        # Detail area (for selected item)
+        details_group = QGroupBox("Item Details")
+        details_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 1px solid #c0c0c0;
+                border-radius: 5px;
+                margin-top: 10px;
+                padding-top: 15px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top center;
+                padding: 0 5px;
+                color: #0066cc;
+            }
+        """)
+        
+        details_layout = QVBoxLayout(details_group)
+        
+        # Form layout for basic info
+        form_layout = QFormLayout()
+        form_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        form_layout.setContentsMargins(0, 0, 0, 0)
+        form_layout.setSpacing(8)
+        
+        # ID field (read-only)
+        self.id_field = QLineEdit()
+        self.id_field.setReadOnly(True)
+        self.id_field.setStyleSheet("background-color: #f0f0f0;")
+        form_layout.addRow("ID:", self.id_field)
+        
+        # Category field
+        self.category_field = QLineEdit()
+        form_layout.addRow("Category:", self.category_field)
+        
+        # Type field
+        self.type_field = QLineEdit()
+        form_layout.addRow("Type:", self.type_field)
+        
+        details_layout.addLayout(form_layout)
+        
+        # Scroll area for PII items
+        pii_scroll = QScrollArea()
+        pii_scroll.setWidgetResizable(True)
+        pii_container = QWidget()
+        self.pii_layout = QVBoxLayout(pii_container)
+        pii_scroll.setWidget(pii_container)
+        pii_scroll.setMinimumHeight(200)
+        details_layout.addWidget(pii_scroll)
+        
+        # Buttons for details
+        buttons_layout = QHBoxLayout()
+        
+        self.save_btn = QPushButton("Save Changes")
+        self.save_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogSaveButton))
+        self.save_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #388E3C;
+            }
+            QPushButton:disabled {
+                background-color: #A5D6A7;
+                color: #E8F5E9;
+            }
+        """)
+        self.save_btn.setEnabled(False)
+        self.save_btn.clicked.connect(self.save_item)
+        
+        self.delete_btn = QPushButton("Delete Item")
+        self.delete_btn.setIcon(self.style().standardIcon(QStyle.SP_TrashIcon))
+        self.delete_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #F44336;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #D32F2F;
+            }
+            QPushButton:disabled {
+                background-color: #FFCDD2;
+                color: #FFEBEE;
+            }
+        """)
+        self.delete_btn.setEnabled(False)
+        self.delete_btn.clicked.connect(self.delete_item)
+        
+        clear_btn = QPushButton("Clear")
+        clear_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogResetButton))
+        clear_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #9E9E9E;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #757575;
+            }
+        """)
+        clear_btn.clicked.connect(self.clear_details)
+        
+        buttons_layout.addWidget(clear_btn)
+        buttons_layout.addStretch()
+        buttons_layout.addWidget(self.save_btn)
+        buttons_layout.addWidget(self.delete_btn)
+        
+        details_layout.addLayout(buttons_layout)
+        
+        main_layout.addWidget(details_group)
+        
+        # Status bar
+        self.status_label = QLabel("Ready")
+        self.status_label.setStyleSheet("color: #666; font-style: italic;")
+        main_layout.addWidget(self.status_label)
+
     def fetch_data(self):
         """Fetch PII data from the server with robust error handling and protection against widget deletion."""
         # Show loading indicator
@@ -313,7 +515,7 @@ class EnhancedDataDialog(QDialog):
                     # Update filters and table safely
                     try:
                         self.update_filters()
-                        self.populate_table()
+                        self.apply_filters()
                     except RuntimeError:
                         self.logger.warning("Widget error during UI update")
                     
@@ -345,15 +547,190 @@ class EnhancedDataDialog(QDialog):
             # Fall back to auth_service
             elif self.auth_service:
                 # Similar error handling for the auth_service section...
-                # (Implementation skipped for brevity but would follow the same pattern)
-                pass
+                self.logger.info("Fetching data using auth service")
+                try:
+                    if hasattr(self, 'status_label') and self.status_label is not None:
+                        self.status_label.setText("Fetching data using auth service...")
+                except RuntimeError:
+                    pass
+                
+                try:
+                    progress.setValue(30)
+                    QApplication.processEvents()
+                except RuntimeError:
+                    pass
+                
+                # Handle both synchronous and asynchronous make_authenticated_request
+                import inspect
+                if hasattr(self.auth_service, 'make_authenticated_request'):
+                    if inspect.iscoroutinefunction(self.auth_service.make_authenticated_request):
+                        # Async method
+                        import asyncio
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        try:
+                            success, data = loop.run_until_complete(
+                                self.auth_service.make_authenticated_request("GET", "pii")
+                            )
+                        finally:
+                            loop.close()
+                    else:
+                        # Sync method
+                        success, data = self.auth_service.make_authenticated_request("GET", "pii")
+                elif hasattr(self.auth_service, 'make_synchronous_request'):
+                    success, data = self.auth_service.make_synchronous_request("GET", "pii")
+                else:
+                    raise ValueError("Auth service does not have a suitable request method")
+                
+                try:
+                    progress.setValue(70)
+                    QApplication.processEvents()
+                except RuntimeError:
+                    pass
+                
+                if success:
+                    if isinstance(data, list):
+                        self.data = data
+                    else:
+                        # Handle non-list response
+                        if isinstance(data, dict):
+                            self.data = [data]
+                        else:
+                            # Try to convert to list
+                            try:
+                                self.data = list(data)
+                            except:
+                                self.data = [{"Raw Data": str(data)}]
+                    
+                    self.logger.info(f"Fetched {len(self.data)} PII items")
+                    try:
+                        if hasattr(self, 'status_label') and self.status_label is not None:
+                            self.status_label.setText(f"Successfully loaded {len(self.data)} items")
+                    except RuntimeError:
+                        pass
+                        
+                    try:
+                        progress.setValue(90)
+                        QApplication.processEvents()
+                    except RuntimeError:
+                        pass
+                    
+                    # Update filters and table safely
+                    try:
+                        self.update_filters()
+                        self.apply_filters()
+                    except RuntimeError:
+                        self.logger.warning("Widget error during UI update")
+                    
+                    # Finish progress
+                    try:
+                        progress.setValue(100)
+                        QApplication.processEvents()
+                    except RuntimeError:
+                        pass
+                else:
+                    error_msg = data.get('error', str(data)) if isinstance(data, dict) else str(data)
+                    self.logger.error(f"Auth service error: {error_msg}")
+                    
+                    # Update status label with error
+                    try:
+                        if hasattr(self, 'status_label') and self.status_label is not None:
+                            self.status_label.setText(f"Error: {error_msg}")
+                            self.status_label.setStyleSheet("color: red; font-weight: bold;")
+                    except RuntimeError:
+                        pass
+                    
+                    try:
+                        progress.close()
+                    except RuntimeError:
+                        pass
+                        
+                    raise ValueError(f"Auth service error: {error_msg}")
                 
             # Last resort: try agent directly
             elif self.agent:
-                # Similar error handling for the agent section...
-                # (Implementation skipped for brevity but would follow the same pattern)
-                pass
-            
+                self.logger.info("Fetching data using direct agent access")
+                try:
+                    if hasattr(self, 'status_label') and self.status_label is not None:
+                        self.status_label.setText("Fetching data using direct agent access...")
+                except RuntimeError:
+                    pass
+                
+                try:
+                    progress.setValue(30)
+                    QApplication.processEvents()
+                except RuntimeError:
+                    pass
+                
+                data = self.agent.get_all_data()
+                
+                try:
+                    progress.setValue(70)
+                    QApplication.processEvents()
+                except RuntimeError:
+                    pass
+                
+                if data:
+                    if isinstance(data, list):
+                        self.data = data
+                    else:
+                        # Handle non-list response
+                        if isinstance(data, dict):
+                            self.data = [data]
+                        elif isinstance(data, pd.DataFrame):
+                            self.data = data.to_dict(orient='records')
+                        else:
+                            # Try to convert to list
+                            try:
+                                self.data = list(data)
+                            except:
+                                self.data = [{"Raw Data": str(data)}]
+                    
+                    self.logger.info(f"Fetched {len(self.data)} PII items")
+                    try:
+                        if hasattr(self, 'status_label') and self.status_label is not None:
+                            self.status_label.setText(f"Successfully loaded {len(self.data)} items")
+                    except RuntimeError:
+                        pass
+                        
+                    try:
+                        progress.setValue(90)
+                        QApplication.processEvents()
+                    except RuntimeError:
+                        pass
+                    
+                    # Update filters and table safely
+                    try:
+                        self.update_filters()
+                        self.apply_filters()
+                    except RuntimeError:
+                        self.logger.warning("Widget error during UI update")
+                    
+                    # Finish progress
+                    try:
+                        progress.setValue(100)
+                        QApplication.processEvents()
+                    except RuntimeError:
+                        pass
+                else:
+                    error_msg = "No data returned from agent"
+                    self.logger.error(error_msg)
+                    
+                    # Update status label with error
+                    try:
+                        if hasattr(self, 'status_label') and self.status_label is not None:
+                            self.status_label.setText(f"Error: {error_msg}")
+                            self.status_label.setStyleSheet("color: red; font-weight: bold;")
+                    except RuntimeError:
+                        pass
+                    
+                    try:
+                        progress.close()
+                    except RuntimeError:
+                        pass
+                        
+                    raise ValueError(error_msg)
+                
             else:
                 try:
                     if hasattr(self, 'status_label') and self.status_label is not None:
@@ -453,64 +830,7 @@ class EnhancedDataDialog(QDialog):
                 self.table.setColumnWidth(col, min(400, max(200, width)))
             else:
                 self.table.setColumnWidth(col, min(200, max(100, width)))
-
         
-    def populate_table(self):
-        """Populate the table with filtered data and improved styling."""
-        # Clear existing rows
-        self.table.setRowCount(0)
-        
-        if not self.filtered_data:
-            return
-                
-        # Populate table with filtered data
-        for row, item in enumerate(self.filtered_data):
-            self.table.insertRow(row)
-            
-            # ID column
-            id_item = QTableWidgetItem(item.get('_id', ''))
-            id_item.setTextAlignment(Qt.AlignCenter)
-            self.table.setItem(row, 0, id_item)
-            
-            # Category column
-            category_item = QTableWidgetItem(item.get('Category', ''))
-            category_item.setTextAlignment(Qt.AlignCenter)
-            self.table.setItem(row, 1, category_item)
-            
-            # Type column
-            type_item = QTableWidgetItem(item.get('Type', ''))
-            type_item.setTextAlignment(Qt.AlignCenter)
-            self.table.setItem(row, 2, type_item)
-            
-            # PII Data preview
-            pii_text = self.get_pii_preview(item.get('PII', ''))
-            pii_item = QTableWidgetItem(pii_text)
-            self.table.setItem(row, 3, pii_item)
-            
-            # Set row colors for better visibility (alternating)
-            for col in range(self.table.columnCount()):
-                cell = self.table.item(row, col)
-                if cell:
-                    if row % 2 == 0:
-                        cell.setBackground(QColor("#f5f5f5"))
-                    else:
-                        cell.setBackground(QColor("#ffffff"))
-            
-        # Adjust columns and row heights for better visibility
-        self.table.resizeColumnsToContents()
-        self.table.resizeRowsToContents()
-        
-        # Set minimum and maximum column widths
-        for col in range(self.table.columnCount()):
-            width = self.table.columnWidth(col)
-            if col == 0:  # ID column
-                self.table.setColumnWidth(col, min(200, max(100, width)))
-            elif col == 3:  # PII preview column
-                self.table.setColumnWidth(col, min(400, max(200, width)))
-            else:
-                self.table.setColumnWidth(col, min(200, max(100, width)))
-
-    
     def display_item_details(self, item):
         """
         Display item details in the form with highly improved PII data visualization.
@@ -1175,50 +1495,34 @@ class EnhancedDataDialog(QDialog):
                 value_input = None
                 
                 # Search through the widget hierarchy for QLineEdit fields
-                # First, get the layout
                 frame_layout = widget.layout()
                 if not frame_layout:
                     continue
                     
-                # Look for form layouts that contain our fields
-                for j in range(frame_layout.count()):
-                    layout_item = frame_layout.itemAt(j)
-                    
-                    # Check if this is a form layout
-                    if isinstance(layout_item, QFormLayout):
-                        form_layout = layout_item
+                # Search for QLineEdit or QTextEdit widgets in the layout
+                name_inputs = widget.findChildren(QLineEdit, options=Qt.FindChildrenRecursively)
+                text_editors = widget.findChildren(QTextEdit, options=Qt.FindChildrenRecursively)
+                
+                # Usually the first QLineEdit is the name input
+                if name_inputs:
+                    name_input = name_inputs[0]
+                    # If there's more than one, the second might be a value input
+                    if len(name_inputs) > 1:
+                        value_input = name_inputs[1]
                         
-                        # Form layouts store rows as (label, field)
-                        for row in range(form_layout.rowCount()):
-                            label_item = form_layout.itemAt(row, QFormLayout.LabelRole)
-                            field_item = form_layout.itemAt(row, QFormLayout.FieldRole)
-                            
-                            if label_item and field_item:
-                                label_widget = label_item.widget()
-                                field_widget = field_item.widget()
-                                
-                                if isinstance(label_widget, QLabel) and isinstance(field_widget, QLineEdit):
-                                    label_text = label_widget.text().lower().strip(':')
-                                    
-                                    if label_text == "name":
-                                        name_input = field_widget
-                                    elif label_text == "value":
-                                        value_input = field_widget
-                    elif isinstance(layout_item, QHBoxLayout):
-                        # Handle horizontal layouts (might contain line edits)
-                        for k in range(layout_item.count()):
-                            widget_item = layout_item.itemAt(k)
-                            if widget_item and isinstance(widget_item.widget(), QLineEdit):
-                                # Determine if this is name or value based on order
-                                if name_input is None:
-                                    name_input = widget_item.widget()
-                                elif value_input is None:
-                                    value_input = widget_item.widget()
+                # If we have a text editor, that's likely the value input
+                if text_editors and not value_input:
+                    value_input = text_editors[0]
                 
                 # If we found both inputs, add to our PII items
                 if name_input and value_input:
                     name = name_input.text().strip()
-                    value = value_input.text()
+                    
+                    # Get value from either QLineEdit or QTextEdit
+                    if isinstance(value_input, QLineEdit):
+                        value = value_input.text()
+                    else:  # QTextEdit
+                        value = value_input.toPlainText()
                     
                     if name:  # Only add if name is not empty
                         pii_items.append({
@@ -1359,7 +1663,7 @@ class EnhancedDataDialog(QDialog):
         Create a new item.
         
         Args:
-            item_data: Item data to create
+            item_data (dict): Item data to create
             
         Returns:
             tuple: (success, result)
@@ -1413,7 +1717,7 @@ class EnhancedDataDialog(QDialog):
         Update an existing item.
         
         Args:
-            item_data: Item data to update
+            item_data (dict): Item data to update
             
         Returns:
             tuple: (success, result)
@@ -1523,7 +1827,7 @@ class EnhancedDataDialog(QDialog):
         Delete an item.
         
         Args:
-            delete_data: Item data to delete
+            delete_data (dict): Item data to delete
             
         Returns:
             tuple: (success, result)
