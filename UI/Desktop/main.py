@@ -27,15 +27,16 @@ from PyQt5.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QTableWidget,
     QHeaderView, QTableWidgetItem, QDialog, QScrollArea, QSizePolicy,
     QAbstractItemView, QApplication, QMenu, QAction, QTabWidget,
-    QProgressBar, QStatusBar
+    QProgressBar, QStatusBar, QStyle
 )
 from UI.Desktop.session_manager import SessionManager
 from API.auth_service import AuthService
 from PyQt5.QtGui import QIcon, QCursor, QGuiApplication
 from PyQt5.QtCore import Qt, QTimer, QDateTime
+from UI.Desktop.modern_components import ModernButton, SessionStatusWidget, ModernDataDialog
 
 # Local application imports
-from API.backend import Agent
+from API.Backend import Agent
 from API.youtube_download import YouTubeDownloaderWidget, integrate_youtube_downloader
 from API.assistant import Assistant
 import API.CONSTANTS as CONSTANTS
@@ -322,6 +323,7 @@ class PIIWindow(QMainWindow):
         
     def ui_components(self):
         """Initialize and set up the UI components."""
+        
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
@@ -335,6 +337,10 @@ class PIIWindow(QMainWindow):
         # Create PII Data tab widget and layout
         self.pii_tab = QWidget()
         pii_layout = QVBoxLayout(self.pii_tab)
+        
+        if hasattr(self, 'session_manager'):
+            self.session_status = SessionStatusWidget(self, self.session_manager)
+            pii_layout.addWidget(self.session_status, alignment=Qt.AlignCenter)
         
         # Welcome text
         self.welcome_text = QLabel(
@@ -1224,92 +1230,17 @@ class PIIWindow(QMainWindow):
                     "Invalid server response or connection issue. Please check the server."
                 )
                 return
-
-            # Set DataFrame data to QTableWidget
-            if isinstance(data_frame, pd.DataFrame):
-                self.populate_table_widget(data_frame)
-                self.table_widget.setContextMenuPolicy(Qt.CustomContextMenu)
-                self.table_widget.customContextMenuRequested.connect(
-                    self.open_context_menu
-                )
-
-            # Add download button
-            btn_download = QPushButton('Download Data', data_window)
-            btn_download.setCursor(QCursor(Qt.PointingHandCursor))
-            btn_download.setIcon(QIcon('download.png'))
-            btn_download.clicked.connect(self.download_pii)
-            layout.addWidget(btn_download)
-
-            # Configure table appearance
-            self.configure_table_widget()
-
-            # Show window
-            self.pii_table_start_time = time.time()
-            data_window.showMaximized()
-            data_window.show()
-
-            # Define window close event handler
-            def on_close_event(event):
-                """Handle data window close event."""
-                event.accept()
-                close_event_start_time = time.time()
-                self.update_log(
-                    self.assistant.get_current_time(),
-                    'Guard Window Closed'
-                )
-
-                if self.modified:
-                    self.update_log(
-                        self.assistant.get_current_time(),
-                        'Data Backup Initiated...'
-                    )
-                    # Use updated method signature without parameters
-                    self.agent.upload_securely()
-                    self.update_log(
-                        self.assistant.get_current_time(),
-                        'Refreshing Data...'
-                    )
-                    refresh_time = time.time()
-                    data = self.process_request()
-                    if data is not None:
-                        refresh_duration = time.time() - refresh_time
-                        self.update_log(
-                            self.assistant.get_current_time(),
-                            'Data Refreshed in %.2f Seconds' % refresh_duration
-                        )
-                        self.populate_data_table(data)
-                        backup_duration = time.time() - close_event_start_time
-                        self.update_log(
-                            self.assistant.get_current_time(),
-                            'Data Backed Up in %.2f Seconds' % backup_duration
-                        )
-
-                close_event_time = close_event_start_time - self.pii_table_start_time
-                self.update_log(
-                    self.assistant.get_current_time(),
-                    'Guard Window Closed after %.2f Seconds' % close_event_time
-                )
-
-            data_window.closeEvent = on_close_event
-
-        except subprocess.CalledProcessError as e:
-            if 'ConnectionError' in str(e):
-                self.update_log(
-                    self.assistant.get_current_time(),
-                    'Connection Error: Unable to reach server.'
-                )
-                QMessageBox.warning(
-                    self,
-                    "Connection Error",
-                    "Please run the Server. Application unable to detect SERVER"
-                )
-                return
-
-            QMessageBox.warning(
-                self,
-                "Connection Error",
-                "Please run the Server. Application unable to detect SERVER"
-            )
+                
+            # Create and show the modern data dialog
+            data_dialog = ModernDataDialog(self)
+            data_dialog.set_data(data)
+            
+            # Connect download button
+            data_dialog.download_btn.clicked.connect(self.download_pii)
+            
+            # Show the dialog
+            data_dialog.exec_()
+            
         except Exception as e:
             self.update_log(
                 self.assistant.get_current_time(),
