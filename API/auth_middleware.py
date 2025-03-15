@@ -13,6 +13,7 @@ from typing import Optional, Dict, Any, Callable
 from fastapi import Request, HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import boto3
+import datetime
 from botocore.exceptions import ClientError
 
 # Configure logging
@@ -42,7 +43,7 @@ except ImportError:
 
 class AuthSettings:
     """Settings for authentication configuration."""
-    JWT_SECRET = os.environ.get("JWT_SECRET", "your-secret-key-should-be-in-env")
+    JWT_SECRET = os.environ.get("AUTH_JWT_SECRET", "your-secret-key-should-be-in-env")
     JWT_ALGORITHM = "HS256"
     TOKEN_EXPIRE_MINUTES = 60
     REQUIRE_AUTH = os.environ.get("REQUIRE_AUTH", "true").lower() == "true"
@@ -149,7 +150,7 @@ class AuthDependency(HTTPBearer):
             
     def _validate_aws_token(self, token: str) -> Optional[Dict[str, Any]]:
         """
-        Validate an AWS SSO token.
+        Validate an AWS SSO token correctly respecting TTL.
         
         Args:
             token: The AWS SSO session token
@@ -158,41 +159,11 @@ class AuthDependency(HTTPBearer):
             Dict containing user information or None if invalid
         """
         try:
-            # Get AWS credentials from environment - these should be set by the client
-            # during the AWS SSO authentication process
-            aws_access_key = os.environ.get('AWS_ACCESS_KEY_ID', '')
-            aws_secret_key = os.environ.get('AWS_SECRET_ACCESS_KEY', '')
-            
-            # When running in different processes, the environment variables 
-            # might not be shared properly
-            if not aws_access_key or not aws_secret_key:
-                logger.warning("AWS credentials environment variables not set properly")
-                # Try to get credentials from request headers instead
-                request = getattr(self, 'request', None)
-                if request:
-                    aws_access_key = request.headers.get('X-AWS-Access-Key-ID', '')
-                    aws_secret_key = request.headers.get('X-AWS-Secret-Access-Key', '')
-                    # We already have the token from the Authorization header
-            
-            # Log available credentials for debugging (mask secrets)
-            logger.debug(f"Using AWS Access Key: {aws_access_key[:4]}{'*' * 12 if aws_access_key else ''}")
-            logger.debug(f"Has AWS Secret Key: {bool(aws_secret_key)}")
-            
-            # Create STS client with the token and credentials if available
-            if aws_access_key and aws_secret_key:
-                # Use both provided credentials and token
-                sts = boto3.client(
-                    'sts',
-                    aws_access_key_id=aws_access_key,
-                    aws_secret_access_key=aws_secret_key,
-                    aws_session_token=token
-                )
-            else:
-                # Fall back to using only the token (less likely to work)
-                sts = boto3.client(
-                    'sts',
-                    aws_session_token=token
-                )
+            # Create STS client using the token directly
+            sts = boto3.client(
+                'sts',
+                aws_session_token=token
+            )
             
             # Check token validity by making a lightweight API call
             response = sts.get_caller_identity()
@@ -204,6 +175,24 @@ class AuthDependency(HTTPBearer):
                 "account": response.get("Account", ""),
                 "auth_type": "aws_sso"
             }
+            
+            # Determine remaining TTL by checking token expiration
+            try:
+                # Get token expiration from a specific AWS API call
+                credentials = sts.get_session_token()['Credentials']
+                if 'Expiration' in credentials:
+                    # Convert to proper datetime with timezone
+                    expiry = credentials['Expiration']
+                    if isinstance(expiry, str):
+                        expiry = datetime.datetime.fromisoformat(expiry.replace('Z', '+00:00'))
+                    
+                    # Add expiration to user info
+                    user_info["exp"] = expiry.timestamp()
+                    user_info["token_ttl"] = (expiry - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
+            except Exception as e:
+                # Default to 8 hours if we can't get the actual expiration
+                logger.warning(f"Couldn't determine token TTL, using default: {e}")
+                user_info["token_ttl"] = 28800  # 8 hours in seconds
             
             logger.info(f"Successfully validated AWS SSO token for user {user_info['sub']}")
             return user_info

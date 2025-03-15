@@ -47,7 +47,8 @@ except ImportError:
         jwt = DummyJWT()
 
 # JWT configuration
-JWT_SECRET = "your-secret-key-should-be-in-env"  # This should match what's in auth_middleware.py
+# This should match what's in auth_middleware.py
+JWT_SECRET = os.environ.get("AUTH_JWT_SECRET", "your_jwt_secret")
 JWT_ALGORITHM = "HS256"
 TOKEN_EXPIRE_MINUTES = 60
 

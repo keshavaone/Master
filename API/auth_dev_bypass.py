@@ -23,7 +23,7 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger('auth_dev_bypass')
 
 # JWT configuration - should match what's in auth_middleware.py
-JWT_SECRET = "your-secret-key-should-be-in-env"  # Default value from auth_middleware.py
+JWT_SECRET = os.environ.get("AUTH_JWT_SECRET", "default_secret")  # Default value from auth_middleware.py
 JWT_ALGORITHM = "HS256"
 TOKEN_EXPIRE_MINUTES = 60
 

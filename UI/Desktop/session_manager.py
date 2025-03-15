@@ -234,310 +234,195 @@ class SessionManager(QObject):
 
     def authenticate_aws_sso(self, parent_widget=None) -> bool:
         """
-        Authenticate using real AWS SSO with actual token retrieval.
-
-        Args:
-            parent_widget: Parent widget for dialogs
-
-        Returns:
-            bool: True if authentication successful
+        Authenticate with AWS SSO correctly.
         """
         try:
-            # Load the SSO configuration
-            config = self._load_sso_config()
-            if not config:
-                if parent_widget:
-                    reply = QMessageBox.question(
-                        parent_widget,
-                        "AWS SSO Configuration",
-                        "AWS SSO is not configured. Would you like to configure it now?",
-                        QMessageBox.Yes | QMessageBox.No,
-                        QMessageBox.Yes
-                    )
-                    if reply == QMessageBox.Yes:
-                        config = self._configure_aws_sso(parent_widget)
-                        if not config:
-                            self._log_auth_event(False, "AWS SSO configuration failed")
-                            return False
-                    else:
-                        return False
+            session = boto3.Session(profile_name=self.aws_profile)
+            credentials = session.get_credentials()
+            self.credentials = {
+            'AccessKeyId': credentials.access_key,
+            'SecretAccessKey': credentials.secret_key,
+        }
+            if hasattr(credentials, 'token') and credentials.token:
+                self.session_token = credentials.token
+                self.credentials['SessionToken'] = credentials.token
+                
+                # Get expiry from credentials if possible
+                if hasattr(credentials, '_expiry_time') and credentials._expiry_time:
+                    self.expiration_time = credentials._expiry_time
                 else:
-                    self.logger.error("AWS SSO not configured")
-                    return False
-
-            # Store the config
-            self.sso_config = config
+                    # Default to 8 hours if we can't determine the actual expiry
+                    self.expiration_time = datetime.datetime.now() + datetime.timedelta(hours=8)
             
-            # Create progress dialog
-            progress = None
-            if parent_widget:
-                progress = QProgressDialog("Authenticating with AWS SSO...", 
-                                          "Cancel", 0, 0, parent_widget)
-                progress.setWindowTitle("AWS SSO Authentication")
-                progress.setModal(True)
-                progress.show()
-            
-            # Set the AWS_PROFILE environment variable if specified
-            self.aws_profile = config.get('profile_name', 'guard-sso-profile')
-            
-            # Prepare AWS SSO login command
-            sso_start_url = config.get('sso_start_url')
-            sso_region = config.get('sso_region', 'us-east-1')
-            
-            # First check if we already have valid credentials
-            if self._check_existing_sso_credentials():
-                self.logger.info("Using existing valid AWS SSO credentials")
-                if progress:
-                    progress.close()
-                return True
-            
-            # We need to authenticate - display URL to user
-            if parent_widget:
-                if progress:
-                    progress.close()
-                    
-                result = QMessageBox.information(
-                    parent_widget,
-                    "AWS SSO Login",
-                    f"Please complete your AWS SSO login in the browser. A browser window should open automatically.\n\n"
-                    f"If not, please visit:\n{sso_start_url}\n\n"
-                    "After logging in through the browser, click OK to continue.",
-                    QMessageBox.Ok | QMessageBox.Cancel
-                )
+            # Check if AWS CLI is configured for SSO
+            config_file = os.path.expanduser("~/.aws/config")
+            if not os.path.exists(config_file):
+                raise ValueError("AWS CLI not configured. Run 'aws configure sso' first.")
                 
-                if result != QMessageBox.Ok:
-                    self._log_auth_event(False, "AWS SSO authentication cancelled by user")
-                    return False
-                
-                # Show progress dialog again
-                progress = QProgressDialog("Completing AWS SSO authentication...", 
-                                           "Cancel", 0, 0, parent_widget)
-                progress.setWindowTitle("AWS SSO Authentication")
-                progress.setModal(True)
-                progress.show()
+            # Get available profiles
+            import configparser
+            config = configparser.ConfigParser()
+            config.read(config_file)
             
-            # Create a temporary AWS configuration
-            with tempfile.TemporaryDirectory() as temp_dir:
-                # Set environment variables to use our temporary directory
-                env = os.environ.copy()
-                env['AWS_CONFIG_FILE'] = os.path.join(temp_dir, 'config')
-                env['AWS_SHARED_CREDENTIALS_FILE'] = os.path.join(temp_dir, 'credentials')
+            sso_profiles = []
+            for section in config.sections():
+                if section.startswith("profile ") and "sso_start_url" in config[section]:
+                    sso_profiles.append(section.replace("profile ", ""))
+            
+            if not sso_profiles:
+                raise ValueError("No SSO profiles found in AWS config.")
                 
-                # Create the config file
-                with open(env['AWS_CONFIG_FILE'], 'w') as f:
-                    f.write(f"[profile {self.aws_profile}]\n")
-                    f.write(f"sso_start_url = {sso_start_url}\n")
-                    f.write(f"sso_region = {sso_region}\n")
-                    f.write(f"region = {sso_region}\n")
-                    f.write(f"output = json\n")
+            # Use first SSO profile if available
+            profile_name = sso_profiles[0]
+            
+            # Configure boto3 session
+            session = boto3.Session(profile_name=profile_name)
+            
+            # Get credentials from the session
+            credentials = session.get_credentials()
+            if not credentials:
+                # Login required, initiate AWS SSO login
+                self._run_aws_sso_login(profile_name)
                 
-                # Run AWS SSO login
-                try:
-                    cmd = ["aws", "sso", "login", "--profile", self.aws_profile]
-                    self.logger.info(f"Running AWS SSO login command: {' '.join(cmd)}")
+                # Reload session and credentials
+                session = boto3.Session(profile_name=profile_name)
+                credentials = session.get_credentials()
+                
+                if not credentials:
+                    raise ValueError("Failed to obtain AWS credentials after SSO login.")
                     
-                    process = subprocess.Popen(
-                        cmd,
-                        env=env,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        text=True
-                    )
-                    
-                    # Process output in real-time
-                    while True:
-                        output = process.stdout.readline()
-                        if output == '' and process.poll() is not None:
-                            break
-                        if output:
-                            self.logger.info(output.strip())
-                            
-                    rc = process.poll()
-                    if rc != 0:
-                        error = process.stderr.read()
-                        self.logger.error(f"AWS SSO login failed with code {rc}: {error}")
-                        if progress:
-                            progress.close()
-                        self._log_auth_event(False, f"AWS SSO login command failed: {error}")
-                        return False
-                    
-                    # Get the SSO token information
-                    cmd = ["aws", "sts", "get-caller-identity", "--profile", self.aws_profile]
-                    process = subprocess.run(
-                        cmd,
-                        env=env,
-                        check=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        text=True
-                    )
-                    
-                    identity_info = json.loads(process.stdout)
-                    self.user_id = identity_info.get('UserId', 'unknown')
-                    
-                    # Get temporary credentials
-                    cmd = ["aws", "sts", "get-session-token", "--profile", self.aws_profile]
-                    process = subprocess.run(
-                        cmd,
-                        env=env,
-                        check=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        text=True
-                    )
-                    
-                    creds_info = json.loads(process.stdout)
-                    credentials = creds_info.get('Credentials', {})
-                    
-                    # Set up the session
-                    self.is_authenticated = True
-                    self.auth_type = "aws_sso"
-                    self.auth_timestamp = datetime.datetime.now()
-                    self.session_token = credentials.get('SessionToken')
-                    
-                    # AWS SSO tokens typically expire in 8 hours
-                    expiry_str = credentials.get('Expiration')
-                    if expiry_str:
-                        # Parse ISO format datetime
-                        expiry_datetime = datetime.datetime.fromisoformat(
-                            expiry_str.replace('Z', '+00:00'))
-                        # Convert to local timezone
-                        self.expiration_time = expiry_datetime.replace(
-                            tzinfo=datetime.timezone.utc).astimezone(tz=None)
-                    else:
-                        # Fallback to 8 hours if no expiration provided
-                        self.expiration_time = datetime.datetime.now() + datetime.timedelta(hours=8)
-                    
-                    # Store credentials
-                    self.credentials = {
-                        'AccessKeyId': credentials.get('AccessKeyId'),
-                        'SecretAccessKey': credentials.get('SecretAccessKey'),
-                        'SessionToken': credentials.get('SessionToken'),
-                        'Expiration': expiry_str
-                    }
-                    
-                    # Set environment variables for AWS services to use
-                    os.environ['AWS_ACCESS_KEY_ID'] = credentials.get('AccessKeyId', '')
-                    os.environ['AWS_SECRET_ACCESS_KEY'] = credentials.get('SecretAccessKey', '')
-                    os.environ['AWS_SESSION_TOKEN'] = credentials.get('SessionToken', '')
-                    
-                    # Start the session timer
-                    self.start_session_timer()
-                    
-                    if progress:
-                        progress.close()
-                    
-                    # Log successful authentication
-                    self._log_auth_event(True, "AWS SSO authentication successful")
-                    self.auth_success.emit("aws_sso")
-                    return True
-                    
-                except subprocess.CalledProcessError as e:
-                    if progress:
-                        progress.close()
-                    error_msg = f"AWS SSO command failed: {e.stderr}"
-                    self.logger.error(error_msg)
-                    self._log_auth_event(False, error_msg)
-                    self.auth_failure.emit(error_msg)
-                    return False
-                except Exception as e:
-                    if progress:
-                        progress.close()
-                    error_msg = f"AWS SSO authentication error: {str(e)}"
-                    self.logger.error(error_msg)
-                    self._log_auth_event(False, error_msg)
-                    self.auth_failure.emit(f"Authentication error: {str(e)}")
-                    return False
-        except Exception as e:
-            error_msg = f"Unexpected error during AWS SSO authentication: {str(e)}"
-            self.logger.error(error_msg)
-            self._log_auth_event(False, error_msg)
-            if parent_widget:
-                QMessageBox.critical(
-                    parent_widget,
-                    "AWS SSO Error",
-                    error_msg
-                )
-            return False
-
-    def _configure_aws_sso(self, parent_widget) -> Optional[Dict[str, str]]:
-        """
-        Configure AWS SSO settings through UI dialog.
-
-        Args:
-            parent_widget: Parent widget for dialogs
-
-        Returns:
-            Optional[Dict[str, str]]: SSO configuration or None if cancelled
-        """
-        if parent_widget:
-            # Get SSO start URL
-            sso_url, ok = QInputDialog.getText(
-                parent_widget,
-                "AWS SSO Configuration",
-                "Enter SSO start URL:",
-                QLineEdit.Normal,
-                "https://d-9067c603c9.awsapps.com/start/"
-            )
-            if not ok or not sso_url:
-                return None
-
-            # Get SSO region
-            sso_region, ok = QInputDialog.getText(
-                parent_widget,
-                "AWS SSO Configuration",
-                "Enter SSO region:",
-                QLineEdit.Normal,
-                "us-east-1"
-            )
-            if not ok or not sso_region:
-                return None
-
-            # Get account ID
-            account_id, ok = QInputDialog.getText(
-                parent_widget,
-                "AWS SSO Configuration",
-                "Enter AWS account ID:",
-                QLineEdit.Normal,
-                "817215275254"
-            )
-            if not ok or not account_id:
-                return None
-
-            # Get role name
-            role_name, ok = QInputDialog.getText(
-                parent_widget,
-                "AWS SSO Configuration",
-                "Enter role name:",
-                QLineEdit.Normal,
-                "PowerUserAccess"
-            )
-            if not ok or not role_name:
-                return None
-
-            # Get profile name
-            profile_name, ok = QInputDialog.getText(
-                parent_widget,
-                "AWS SSO Configuration",
-                "Enter AWS profile name:",
-                QLineEdit.Normal,
-                "guard_session"
-            )
-            if not ok or not profile_name:
-                return None
-
-            # Save configuration
-            config = {
-                'sso_start_url': sso_url,
-                'sso_region': sso_region,
-                'account_id': account_id,
-                'role_name': role_name,
-                'profile_name': profile_name
+            # Verify credentials work by making a test API call
+            sts = session.client('sts')
+            caller_identity = sts.get_caller_identity()
+            
+            # Set up session with the verified credentials
+            self.is_authenticated = True
+            self.auth_type = "aws_sso"
+            self.auth_timestamp = datetime.datetime.now()
+            self.user_id = caller_identity.get('UserId', 'unknown')
+            
+            # Store creds for the app to use
+            self.session_token = credentials.token if hasattr(credentials, 'token') else None
+            self.credentials = {
+                'AccessKeyId': credentials.access_key,
+                'SecretAccessKey': credentials.secret_key,
             }
+            if self.session_token:
+                self.credentials['SessionToken'] = self.session_token
+                
+            # Determine token expiration from credentials
+            if hasattr(credentials, '_expiry_time') and credentials._expiry_time:
+                self.expiration_time = credentials._expiry_time 
+            else:
+                # Default to 8 hours if we can't determine the actual expiry
+                self.expiration_time = datetime.datetime.now() + datetime.timedelta(hours=8)
+                
+            # Start the session timer
+            self.start_session_timer()
+            
+            # Ensure AWS credentials are available to child processes
+            os.environ['AWS_ACCESS_KEY_ID'] = credentials.access_key
+            os.environ['AWS_SECRET_ACCESS_KEY'] = credentials.secret_key
+            if self.session_token:
+                os.environ['AWS_SESSION_TOKEN'] = self.session_token
+                
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"AWS SSO authentication error: {str(e)}")
+            return False
+        
+    def _run_aws_sso_login(self, profile_name):
+        """
+        Run AWS SSO login process for the specified profile.
+        """
+        try:
+            subprocess.run(
+                ["aws", "sso", "login", "--profile", profile_name], 
+                check=True,
+                capture_output=True
+            )
+        except subprocess.CalledProcessError as e:
+            raise ValueError(f"AWS SSO login failed: {e.stderr.decode()}")
 
-            self._save_sso_config(config)
-            return config
-        return None
+        def _configure_aws_sso(self, parent_widget) -> Optional[Dict[str, str]]:
+            """
+            Configure AWS SSO settings through UI dialog.
+
+            Args:
+                parent_widget: Parent widget for dialogs
+
+            Returns:
+                Optional[Dict[str, str]]: SSO configuration or None if cancelled
+            """
+            if parent_widget:
+                # Get SSO start URL
+                sso_url, ok = QInputDialog.getText(
+                    parent_widget,
+                    "AWS SSO Configuration",
+                    "Enter SSO start URL:",
+                    QLineEdit.Normal,
+                    "https://d-9067c603c9.awsapps.com/start/"
+                )
+                if not ok or not sso_url:
+                    return None
+
+                # Get SSO region
+                sso_region, ok = QInputDialog.getText(
+                    parent_widget,
+                    "AWS SSO Configuration",
+                    "Enter SSO region:",
+                    QLineEdit.Normal,
+                    "us-east-1"
+                )
+                if not ok or not sso_region:
+                    return None
+
+                # Get account ID
+                account_id, ok = QInputDialog.getText(
+                    parent_widget,
+                    "AWS SSO Configuration",
+                    "Enter AWS account ID:",
+                    QLineEdit.Normal,
+                    "817215275254"
+                )
+                if not ok or not account_id:
+                    return None
+
+                # Get role name
+                role_name, ok = QInputDialog.getText(
+                    parent_widget,
+                    "AWS SSO Configuration",
+                    "Enter role name:",
+                    QLineEdit.Normal,
+                    "PowerUserAccess"
+                )
+                if not ok or not role_name:
+                    return None
+
+                # Get profile name
+                profile_name, ok = QInputDialog.getText(
+                    parent_widget,
+                    "AWS SSO Configuration",
+                    "Enter AWS profile name:",
+                    QLineEdit.Normal,
+                    "guard_session"
+                )
+                if not ok or not profile_name:
+                    return None
+
+                # Save configuration
+                config = {
+                    'sso_start_url': sso_url,
+                    'sso_region': sso_region,
+                    'account_id': account_id,
+                    'role_name': role_name,
+                    'profile_name': profile_name
+                }
+
+                self._save_sso_config(config)
+                return config
+            return None
 
     def _check_existing_sso_credentials(self) -> bool:
         """

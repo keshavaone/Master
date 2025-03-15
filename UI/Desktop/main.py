@@ -3054,7 +3054,7 @@ class PIIWindow(QMainWindow):
             self.password_input.clear()
 
     # Update the authenticate_with_sso method:
-    def authenticate_with_sso(self):
+    def authenticate_with_sso(self, parent_widget=None) -> bool:
         """Authenticate using AWS SSO."""
         self.btn_sso_login.setText('Authenticating with SSO...')
         self.btn_sso_login.setDisabled(True)
