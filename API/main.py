@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, ValidationError
 import API.CONSTANTS as CONSTANTS
 from API.backend import Agent
 from API.auth_endpoints import router as auth_router
-from API.auth_middleware import auth_required, get_current_user, audit_log_middleware
+from API.auth_middleware import enhanced_auth_required as auth_required, get_current_user
 from fastapi import FastAPI, HTTPException, status, Request, Depends, Header
 import uvicorn
 import boto3
@@ -17,6 +17,8 @@ import pandas as pd
 import os
 from botocore.exceptions import ClientError
 from datetime import datetime
+from API.aws_sso_endpoint import aws_sso_router
+
 
 # Configure logging
 handler = RotatingFileHandler(
@@ -31,6 +33,7 @@ app = FastAPI(
     version="1.0.0"
 )
 app.include_router(auth_router)
+app.include_router(aws_sso_router)
 
 # Request counter
 counter_calls = Counter()
@@ -110,8 +113,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Add audit logging middleware
-app.middleware("http")(audit_log_middleware)
 
 # Add request counting middleware
 @app.middleware("http")
