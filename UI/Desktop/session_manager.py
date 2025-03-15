@@ -1,7 +1,7 @@
 """
 Enhanced session management module for the GUARD application.
 
-This module provides secure session management with proper AWS SSO integration,
+This module provides secure session management with real AWS SSO integration,
 token refresh mechanisms, and expiration handling.
 """
 
@@ -12,26 +12,29 @@ import json
 import hashlib
 import logging
 import datetime
-import threading
 import boto3
-from typing import Dict, Any, Optional
+import tempfile
+import subprocess
+from typing import Dict, Any, Optional, Tuple
 from botocore.exceptions import ClientError, ProfileNotFound
 from PyQt5.QtWidgets import QMessageBox, QInputDialog, QLineEdit, QProgressDialog
-from PyQt5.QtCore import QTimer, QDateTime, QObject, pyqtSignal
+from PyQt5.QtCore import QTimer, QDateTime, QObject, pyqtSignal, QEventLoop
 
 
 class SessionManager(QObject):
     """
-    Enhanced session manager with AWS SSO integration.
+    Enhanced session manager with real AWS SSO integration.
 
     Manages authentication, session tokens, and provides proper
-    expiration and refresh handling.
+    expiration and refresh handling based on AWS SSO token TTLs.
     """
 
     # Signals
     session_expired = pyqtSignal()
     token_refreshed = pyqtSignal()
     session_expiring_soon = pyqtSignal(int)  # Minutes remaining
+    auth_success = pyqtSignal(str)  # Authentication type
+    auth_failure = pyqtSignal(str)  # Error message
 
     def __init__(self, parent=None, token_ttl=3600, refresh_threshold=300, warning_threshold=600):
         """
@@ -39,7 +42,7 @@ class SessionManager(QObject):
 
         Args:
             parent: Parent QObject
-            token_ttl (int): Time-to-live for session tokens in seconds (default: 1 hour)
+            token_ttl (int): Time-to-live for password session tokens in seconds (default: 1 hour)
             refresh_threshold (int): Time threshold for token refresh in seconds (default: 5 minutes)
             warning_threshold (int): Time threshold to warn about expiration in seconds (default: 10 minutes)
         """
@@ -56,6 +59,10 @@ class SessionManager(QObject):
         self.is_authenticated = False
         self.auth_type = None
         self.sso_session_name = "guard-app"
+        self.auth_timestamp = None
+        self.auth_ip = None
+        self.sso_config = None
+        self.aws_profile = None
 
         # Set up logging
         self.logger = logging.getLogger('SessionManager')
@@ -67,6 +74,24 @@ class SessionManager(QObject):
         self.logger.setLevel(logging.INFO)
 
         self.logger.info("Session manager initialized")
+        
+        # Track user IP for audit purposes
+        self._get_user_ip()
+
+    def _get_user_ip(self):
+        """Get the user's IP address for audit logging."""
+        try:
+            # Try to get public IP (if connected to internet)
+            import socket
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            self.auth_ip = s.getsockname()[0]
+            s.close()
+        except:
+            # Fallback to hostname if not connected
+            self.auth_ip = socket.gethostname()
+        
+        self.logger.info(f"Session initialized from IP: {self.auth_ip}")
 
     def start_session_timer(self):
         """Start the session timer for token refresh and expiration checking."""
@@ -127,6 +152,7 @@ class SessionManager(QObject):
             if hashed_input == stored_password_hash:
                 self.is_authenticated = True
                 self.auth_type = "password"
+                self.auth_timestamp = datetime.datetime.now()
 
                 # Set expiration time based on token_ttl
                 self.expiration_time = datetime.datetime.now(
@@ -143,66 +169,20 @@ class SessionManager(QObject):
                 # Start the session timer
                 self.start_session_timer()
 
-                self.logger.info(
-                    f"Password authentication successful for user {self.user_id}")
+                # Log successful authentication
+                self._log_auth_event(True, "Password authentication successful")
+                self.auth_success.emit("password")
                 return True
             else:
-                self.logger.warning("Password authentication failed")
+                self._log_auth_event(False, "Password authentication failed - incorrect password")
+                self.auth_failure.emit("Incorrect password")
                 return False
         except Exception as e:
-            self.logger.error(f"Password authentication error: {str(e)}")
+            error_msg = f"Password authentication error: {str(e)}"
+            self.logger.error(error_msg)
+            self._log_auth_event(False, error_msg)
+            self.auth_failure.emit(f"Authentication error: {str(e)}")
             return False
-
-    def configure_aws_sso(self, parent_widget=None):
-        """
-        Configure AWS SSO settings through UI dialog.
-
-        Args:
-            parent_widget: Parent widget for dialogs
-
-        Returns:
-            bool: True if configuration successful
-        """
-        if parent_widget:
-            # Get SSO start URL
-            sso_url = "https://d-9067c603c9.awsapps.com/start"
-
-            # Get SSO region
-            sso_region = "us-east-1"
-
-            # Get account ID
-            account_id = "817215275254"
-            # Get role name
-            role_name = "PowerUserAccess"
-
-            # Save configuration
-            config = {
-                'sso_start_url': sso_url,
-                'sso_region': sso_region,
-                'account_id': account_id,
-                'role_name': role_name
-            }
-
-            self._save_sso_config(config)
-            return True
-        return False
-
-    def _save_sso_config(self, config: Dict[str, str]):
-        """
-        Save SSO configuration to file.
-
-        Args:
-            config (Dict[str, str]): SSO configuration
-        """
-        os.chdir(os.getcwd())
-        config_dir = os.path.expanduser("~/.guard1")
-        os.makedirs(config_dir, exist_ok=True)
-
-        config_file = os.path.join(config_dir, "sso_config.json")
-        with open(config_file, 'w') as f:
-            json.dump(config, f)
-
-        self.logger.info(f"SSO configuration saved to {config_file}")
 
     def _load_sso_config(self) -> Optional[Dict[str, str]]:
         """
@@ -211,22 +191,36 @@ class SessionManager(QObject):
         Returns:
             Optional[Dict[str, str]]: SSO configuration or None if not found
         """
-        os.chdir(os.getcwd())
-        config_file = os.path.expanduser("~/.guard1/sso_config.json")
+        config_file = os.path.expanduser("~/.guard/sso_config.json")
         if os.path.exists(config_file):
             try:
                 with open(config_file, 'r') as f:
                     config = json.load(f)
-                self.logger.info(
-                    f"SSO configuration loaded from {config_file}")
+                self.logger.info(f"SSO configuration loaded from {config_file}")
                 return config
             except Exception as e:
                 self.logger.error(f"Error loading SSO config: {str(e)}")
         return None
 
+    def _save_sso_config(self, config: Dict[str, str]):
+        """
+        Save SSO configuration to file.
+
+        Args:
+            config (Dict[str, str]): SSO configuration
+        """
+        config_dir = os.path.expanduser("~/.guard")
+        os.makedirs(config_dir, exist_ok=True)
+
+        config_file = os.path.join(config_dir, "sso_config.json")
+        with open(config_file, 'w') as f:
+            json.dump(config, f)
+
+        self.logger.info(f"SSO configuration saved to {config_file}")
+
     def authenticate_aws_sso(self, parent_widget=None) -> bool:
         """
-        Authenticate using AWS SSO with error handling.
+        Authenticate using real AWS SSO with actual token retrieval.
 
         Args:
             parent_widget: Parent widget for dialogs
@@ -235,10 +229,9 @@ class SessionManager(QObject):
             bool: True if authentication successful
         """
         try:
-            # First check if config exists
+            # Load the SSO configuration
             config = self._load_sso_config()
             if not config:
-                # If no config, try to configure
                 if parent_widget:
                     reply = QMessageBox.question(
                         parent_widget,
@@ -248,19 +241,9 @@ class SessionManager(QObject):
                         QMessageBox.Yes
                     )
                     if reply == QMessageBox.Yes:
-                        if not self.configure_aws_sso(parent_widget):
-                            return False
-                        # Reload the config
-                        config = self._load_sso_config()
+                        config = self._configure_aws_sso(parent_widget)
                         if not config:
-                            self.logger.error(
-                                "Failed to load SSO config after saving")
-                            if parent_widget:
-                                QMessageBox.warning(
-                                    parent_widget,
-                                    "Configuration Error",
-                                    "Failed to load SSO configuration after saving."
-                                )
+                            self._log_auth_event(False, "AWS SSO configuration failed")
                             return False
                     else:
                         return False
@@ -268,50 +251,379 @@ class SessionManager(QObject):
                     self.logger.error("AWS SSO not configured")
                     return False
 
-            # Log the configuration being used (without sensitive data)
-            self.logger.info(
-                f"Using SSO configuration with URL: {config.get('sso_start_url', 'Not set')}")
-
-            # For now, let's use a simulated session to bypass AWS CLI issues
+            # Store the config
+            self.sso_config = config
+            
+            # Create progress dialog
+            progress = None
             if parent_widget:
+                progress = QProgressDialog("Authenticating with AWS SSO...", 
+                                          "Cancel", 0, 0, parent_widget)
+                progress.setWindowTitle("AWS SSO Authentication")
+                progress.setModal(True)
+                progress.show()
+            
+            # Set the AWS_PROFILE environment variable if specified
+            self.aws_profile = config.get('profile_name', 'guard-sso-profile')
+            
+            # Prepare AWS SSO login command
+            sso_start_url = config.get('sso_start_url')
+            sso_region = config.get('sso_region', 'us-east-1')
+            
+            # First check if we already have valid credentials
+            if self._check_existing_sso_credentials():
+                self.logger.info("Using existing valid AWS SSO credentials")
+                if progress:
+                    progress.close()
+                return True
+            
+            # We need to authenticate - display URL to user
+            if parent_widget:
+                if progress:
+                    progress.close()
+                    
                 result = QMessageBox.information(
                     parent_widget,
                     "AWS SSO Login",
-                    f"Please complete your AWS SSO login in the browser at:\n\n"
-                    f"{config.get('sso_start_url', 'Not available')}\n\n"
-                    "Once you've completed the login, click OK.\n\n"
-                    "Note: Since there are issues with the AWS authentication, "
-                    "we'll simulate a session for testing purposes.",
+                    f"Please complete your AWS SSO login in the browser. A browser window should open automatically.\n\n"
+                    f"If not, please visit:\n{sso_start_url}\n\n"
+                    "After logging in through the browser, click OK to continue.",
                     QMessageBox.Ok | QMessageBox.Cancel
                 )
-
+                
                 if result != QMessageBox.Ok:
+                    self._log_auth_event(False, "AWS SSO authentication cancelled by user")
                     return False
-
-            # Create simulated session
-            self.is_authenticated = True
-            self.auth_type = "aws_sso"
-            self.user_id = os.environ.get('USER', 'default_user')
-            self.session_token = f"sso-{int(time.time())}-{os.urandom(4).hex()}"
-
-            # Set expiration (8 hours is typical for SSO sessions)
-            self.expiration_time = datetime.datetime.now() + datetime.timedelta(hours=8)
-
-            # Start session timer
-            self.start_session_timer()
-
-            self.logger.info(
-                f"Simulated SSO session created for user {self.user_id}")
-            return True
-
+                
+                # Show progress dialog again
+                progress = QProgressDialog("Completing AWS SSO authentication...", 
+                                           "Cancel", 0, 0, parent_widget)
+                progress.setWindowTitle("AWS SSO Authentication")
+                progress.setModal(True)
+                progress.show()
+            
+            # Create a temporary AWS configuration
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # Set environment variables to use our temporary directory
+                env = os.environ.copy()
+                env['AWS_CONFIG_FILE'] = os.path.join(temp_dir, 'config')
+                env['AWS_SHARED_CREDENTIALS_FILE'] = os.path.join(temp_dir, 'credentials')
+                
+                # Create the config file
+                with open(env['AWS_CONFIG_FILE'], 'w') as f:
+                    f.write(f"[profile {self.aws_profile}]\n")
+                    f.write(f"sso_start_url = {sso_start_url}\n")
+                    f.write(f"sso_region = {sso_region}\n")
+                    f.write(f"region = {sso_region}\n")
+                    f.write(f"output = json\n")
+                
+                # Run AWS SSO login
+                try:
+                    cmd = ["aws", "sso", "login", "--profile", self.aws_profile]
+                    self.logger.info(f"Running AWS SSO login command: {' '.join(cmd)}")
+                    
+                    process = subprocess.Popen(
+                        cmd,
+                        env=env,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True
+                    )
+                    
+                    # Process output in real-time
+                    while True:
+                        output = process.stdout.readline()
+                        if output == '' and process.poll() is not None:
+                            break
+                        if output:
+                            self.logger.info(output.strip())
+                            
+                    rc = process.poll()
+                    if rc != 0:
+                        error = process.stderr.read()
+                        self.logger.error(f"AWS SSO login failed with code {rc}: {error}")
+                        if progress:
+                            progress.close()
+                        self._log_auth_event(False, f"AWS SSO login command failed: {error}")
+                        return False
+                    
+                    # Get the SSO token information
+                    cmd = ["aws", "sts", "get-caller-identity", "--profile", self.aws_profile]
+                    process = subprocess.run(
+                        cmd,
+                        env=env,
+                        check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True
+                    )
+                    
+                    identity_info = json.loads(process.stdout)
+                    self.user_id = identity_info.get('UserId', 'unknown')
+                    
+                    # Get temporary credentials
+                    cmd = ["aws", "sts", "get-session-token", "--profile", self.aws_profile]
+                    process = subprocess.run(
+                        cmd,
+                        env=env,
+                        check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True
+                    )
+                    
+                    creds_info = json.loads(process.stdout)
+                    credentials = creds_info.get('Credentials', {})
+                    
+                    # Set up the session
+                    self.is_authenticated = True
+                    self.auth_type = "aws_sso"
+                    self.auth_timestamp = datetime.datetime.now()
+                    self.session_token = credentials.get('SessionToken')
+                    
+                    # AWS SSO tokens typically expire in 8 hours
+                    expiry_str = credentials.get('Expiration')
+                    if expiry_str:
+                        # Parse ISO format datetime
+                        expiry_datetime = datetime.datetime.fromisoformat(
+                            expiry_str.replace('Z', '+00:00'))
+                        # Convert to local timezone
+                        self.expiration_time = expiry_datetime.replace(
+                            tzinfo=datetime.timezone.utc).astimezone(tz=None)
+                    else:
+                        # Fallback to 8 hours if no expiration provided
+                        self.expiration_time = datetime.datetime.now() + datetime.timedelta(hours=8)
+                    
+                    # Store credentials
+                    self.credentials = {
+                        'AccessKeyId': credentials.get('AccessKeyId'),
+                        'SecretAccessKey': credentials.get('SecretAccessKey'),
+                        'SessionToken': credentials.get('SessionToken'),
+                        'Expiration': expiry_str
+                    }
+                    
+                    # Set environment variables for AWS services to use
+                    os.environ['AWS_ACCESS_KEY_ID'] = credentials.get('AccessKeyId', '')
+                    os.environ['AWS_SECRET_ACCESS_KEY'] = credentials.get('SecretAccessKey', '')
+                    os.environ['AWS_SESSION_TOKEN'] = credentials.get('SessionToken', '')
+                    
+                    # Start the session timer
+                    self.start_session_timer()
+                    
+                    if progress:
+                        progress.close()
+                    
+                    # Log successful authentication
+                    self._log_auth_event(True, "AWS SSO authentication successful")
+                    self.auth_success.emit("aws_sso")
+                    return True
+                    
+                except subprocess.CalledProcessError as e:
+                    if progress:
+                        progress.close()
+                    error_msg = f"AWS SSO command failed: {e.stderr}"
+                    self.logger.error(error_msg)
+                    self._log_auth_event(False, error_msg)
+                    self.auth_failure.emit(error_msg)
+                    return False
+                except Exception as e:
+                    if progress:
+                        progress.close()
+                    error_msg = f"AWS SSO authentication error: {str(e)}"
+                    self.logger.error(error_msg)
+                    self._log_auth_event(False, error_msg)
+                    self.auth_failure.emit(f"Authentication error: {str(e)}")
+                    return False
         except Exception as e:
-            self.logger.error(f"AWS SSO authentication error: {str(e)}")
+            error_msg = f"Unexpected error during AWS SSO authentication: {str(e)}"
+            self.logger.error(error_msg)
+            self._log_auth_event(False, error_msg)
             if parent_widget:
                 QMessageBox.critical(
                     parent_widget,
                     "AWS SSO Error",
-                    f"An error occurred during AWS SSO login: {str(e)}"
+                    error_msg
                 )
+            return False
+
+    def _configure_aws_sso(self, parent_widget) -> Optional[Dict[str, str]]:
+        """
+        Configure AWS SSO settings through UI dialog.
+
+        Args:
+            parent_widget: Parent widget for dialogs
+
+        Returns:
+            Optional[Dict[str, str]]: SSO configuration or None if cancelled
+        """
+        if parent_widget:
+            # Get SSO start URL
+            sso_url, ok = QInputDialog.getText(
+                parent_widget,
+                "AWS SSO Configuration",
+                "Enter SSO start URL:",
+                QLineEdit.Normal,
+                "https://d-example.awsapps.com/start"
+            )
+            if not ok or not sso_url:
+                return None
+
+            # Get SSO region
+            sso_region, ok = QInputDialog.getText(
+                parent_widget,
+                "AWS SSO Configuration",
+                "Enter SSO region:",
+                QLineEdit.Normal,
+                "us-east-1"
+            )
+            if not ok or not sso_region:
+                return None
+
+            # Get account ID
+            account_id, ok = QInputDialog.getText(
+                parent_widget,
+                "AWS SSO Configuration",
+                "Enter AWS account ID:",
+                QLineEdit.Normal,
+                ""
+            )
+            if not ok or not account_id:
+                return None
+
+            # Get role name
+            role_name, ok = QInputDialog.getText(
+                parent_widget,
+                "AWS SSO Configuration",
+                "Enter role name:",
+                QLineEdit.Normal,
+                "PowerUserAccess"
+            )
+            if not ok or not role_name:
+                return None
+
+            # Get profile name
+            profile_name, ok = QInputDialog.getText(
+                parent_widget,
+                "AWS SSO Configuration",
+                "Enter AWS profile name:",
+                QLineEdit.Normal,
+                "guard-sso-profile"
+            )
+            if not ok or not profile_name:
+                return None
+
+            # Save configuration
+            config = {
+                'sso_start_url': sso_url,
+                'sso_region': sso_region,
+                'account_id': account_id,
+                'role_name': role_name,
+                'profile_name': profile_name
+            }
+
+            self._save_sso_config(config)
+            return config
+        return None
+
+    def _check_existing_sso_credentials(self) -> bool:
+        """
+        Check if we have existing valid AWS SSO credentials.
+
+        Returns:
+            bool: True if valid credentials exist
+        """
+        try:
+            # Check if the AWS CLI has valid credentials
+            process = subprocess.run(
+                ["aws", "sts", "get-caller-identity"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            
+            # Parse the identity information
+            identity_info = json.loads(process.stdout)
+            self.user_id = identity_info.get('UserId', 'unknown')
+            
+            # Get session token information
+            session_info = None
+            try:
+                process = subprocess.run(
+                    ["aws", "sts", "get-session-token"],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                session_info = json.loads(process.stdout)
+            except:
+                # If get-session-token fails, the user might have permanent credentials
+                # We'll create a session with 8 hours expiration
+                self.is_authenticated = True
+                self.auth_type = "aws_sso"
+                self.auth_timestamp = datetime.datetime.now()
+                self.session_token = f"sso-{int(time.time())}-{os.urandom(4).hex()}"
+                self.expiration_time = datetime.datetime.now() + datetime.timedelta(hours=8)
+                
+                # Start the session timer
+                self.start_session_timer()
+                
+                # Log successful authentication
+                self._log_auth_event(True, "Using existing AWS credentials")
+                self.auth_success.emit("aws_sso")
+                return True
+            
+            if session_info:
+                credentials = session_info.get('Credentials', {})
+                
+                # Set up the session
+                self.is_authenticated = True
+                self.auth_type = "aws_sso"
+                self.auth_timestamp = datetime.datetime.now()
+                self.session_token = credentials.get('SessionToken')
+                
+                # Parse expiration time
+                expiry_str = credentials.get('Expiration')
+                if expiry_str:
+                    # Parse ISO format datetime
+                    expiry_datetime = datetime.datetime.fromisoformat(
+                        expiry_str.replace('Z', '+00:00'))
+                    # Convert to local timezone
+                    self.expiration_time = expiry_datetime.replace(
+                        tzinfo=datetime.timezone.utc).astimezone(tz=None)
+                else:
+                    # Fallback to 8 hours if no expiration provided
+                    self.expiration_time = datetime.datetime.now() + datetime.timedelta(hours=8)
+                
+                # Store credentials
+                self.credentials = {
+                    'AccessKeyId': credentials.get('AccessKeyId'),
+                    'SecretAccessKey': credentials.get('SecretAccessKey'),
+                    'SessionToken': credentials.get('SessionToken'),
+                    'Expiration': expiry_str
+                }
+                
+                # Set environment variables for AWS services to use
+                os.environ['AWS_ACCESS_KEY_ID'] = credentials.get('AccessKeyId', '')
+                os.environ['AWS_SECRET_ACCESS_KEY'] = credentials.get('SecretAccessKey', '')
+                os.environ['AWS_SESSION_TOKEN'] = credentials.get('SessionToken', '')
+                
+                # Start the session timer
+                self.start_session_timer()
+                
+                # Log successful authentication
+                self._log_auth_event(True, "Using existing AWS session token")
+                self.auth_success.emit("aws_sso")
+                return True
+            
+            return False
+            
+        except subprocess.CalledProcessError:
+            self.logger.info("No valid AWS credentials found")
+            return False
+        except Exception as e:
+            self.logger.error(f"Error checking existing credentials: {str(e)}")
             return False
 
     def is_session_valid(self) -> bool:
@@ -365,38 +677,66 @@ class SessionManager(QObject):
 
         # Different refresh approaches based on auth type
         if self.auth_type == "aws_sso":
-            # For AWS SSO, we need to check if the token is still valid
-            # AWS SSO tokens cannot be refreshed directly; they must be re-authenticated
-            # if they expire. However, since they typically last 8 hours, we can
-            # just check if they're still valid.
-
-            # Try to verify AWS identity
             try:
-                import subprocess
-
-                cmd = ["aws", "sts", "get-caller-identity", "--output", "json"]
-                process = subprocess.run(
-                    cmd,
-                    check=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True
-                )
-
-                # If successful, extend the token expiration
-                # Since we can't actually refresh SSO tokens, we just extend the expiration
-                # Based on the knowledge that SSO tokens typically last 8 hours
-                self.expiration_time = datetime.datetime.now() + datetime.timedelta(minutes=1)
-                self.logger.info(
-                    f"AWS SSO token still valid, extended expiration to {self.expiration_time}")
-
+                # For AWS SSO, we need to validate the token and possibly re-authenticate
+                # Try to call a lightweight AWS service to test if credentials are valid
+                boto3.client('sts').get_caller_identity()
+                
+                # If successful with AWS SSO and we're getting close to expiration,
+                # attempt to obtain a new session token
+                if self.requires_refresh() and self.credentials:
+                    try:
+                        # Try to get a new session token
+                        sts = boto3.client('sts')
+                        response = sts.get_session_token()
+                        
+                        # Update credentials with new session token
+                        if 'Credentials' in response:
+                            credentials = response['Credentials']
+                            self.session_token = credentials['SessionToken']
+                            
+                            # Update expiration time
+                            expiry_datetime = credentials['Expiration']
+                            if isinstance(expiry_datetime, str):
+                                expiry_datetime = datetime.datetime.fromisoformat(
+                                    expiry_datetime.replace('Z', '+00:00'))
+                            self.expiration_time = expiry_datetime.replace(
+                                tzinfo=datetime.timezone.utc).astimezone(tz=None)
+                            
+                            # Update stored credentials
+                            self.credentials = {
+                                'AccessKeyId': credentials['AccessKeyId'],
+                                'SecretAccessKey': credentials['SecretAccessKey'],
+                                'SessionToken': credentials['SessionToken'],
+                                'Expiration': credentials['Expiration'].isoformat() if hasattr(credentials['Expiration'], 'isoformat') else credentials['Expiration']
+                            }
+                            
+                            # Update environment variables
+                            os.environ['AWS_ACCESS_KEY_ID'] = credentials['AccessKeyId']
+                            os.environ['AWS_SECRET_ACCESS_KEY'] = credentials['SecretAccessKey']
+                            os.environ['AWS_SESSION_TOKEN'] = credentials['SessionToken']
+                            
+                            self.logger.info(f"AWS session token refreshed, new expiration: {self.expiration_time}")
+                            return True
+                            
+                    except Exception as e:
+                        self.logger.warning(f"Failed to refresh AWS session token: {str(e)}")
+                        # Continue with existing token if refresh fails
+                
+                # If we didn't successfully refresh but the token is still valid,
+                # just extend the timeout
+                if not self.requires_refresh():
+                    return True
+                    
+                # For AWS SSO we can't easily refresh automatically without user interaction
+                # Instead we'll check if the existing token is still valid
                 return True
-
-            except subprocess.CalledProcessError:
-                self.logger.warning("AWS SSO token validation failed")
+                
+            except Exception as e:
+                self.logger.warning(f"AWS SSO token validation failed: {str(e)}")
                 return False
 
-        else:
+        else:  # "password" auth type
             # For password auth, just extend the expiration time
             self.expiration_time = datetime.datetime.now(
             ) + datetime.timedelta(seconds=self.token_ttl)
@@ -408,11 +748,16 @@ class SessionManager(QObject):
         """Perform logout operations."""
         self.logger.info(f"Logging out user {self.user_id}")
 
+        # Log the logout event
+        if self.is_authenticated:
+            self._log_auth_event(True, "User logged out")
+
         self.is_authenticated = False
         self.session_token = None
         self.expiration_time = None
         self.credentials = None
         self.auth_type = None
+        previous_user = self.user_id
         self.user_id = None
 
         # Stop the timer
@@ -426,7 +771,7 @@ class SessionManager(QObject):
                 del os.environ[var]
                 self.logger.debug(f"Cleared environment variable: {var}")
 
-        self.logger.info("Logout complete")
+        self.logger.info(f"Logout complete for user {previous_user}")
 
     def get_remaining_time(self) -> Optional[int]:
         """
@@ -455,9 +800,12 @@ class SessionManager(QObject):
             "is_authenticated": self.is_authenticated,
             "auth_type": self.auth_type,
             "user_id": self.user_id,
+            "auth_timestamp": self.auth_timestamp.isoformat() if self.auth_timestamp else None,
+            "auth_ip": self.auth_ip,
             "expiration_time": self.expiration_time.isoformat() if self.expiration_time else None,
             "remaining_seconds": remaining_time,
-            "remaining_formatted": self._format_time(remaining_time) if remaining_time else None
+            "remaining_formatted": self._format_time(remaining_time) if remaining_time else None,
+            "aws_profile": self.aws_profile
         }
 
     def _format_time(self, seconds: int) -> str:
@@ -477,3 +825,81 @@ class SessionManager(QObject):
             return f"{hours}h {minutes}m"
         else:
             return f"{minutes}m {seconds}s"
+            
+    def _log_auth_event(self, success: bool, message: str):
+        """
+        Log an authentication event for audit purposes.
+        
+        Args:
+            success (bool): Whether the authentication was successful
+            message (str): A message describing the event
+        """
+        event_type = "SUCCESS" if success else "FAILURE"
+        auth_type = self.auth_type if self.auth_type else "N/A"
+        user = self.user_id if self.user_id else "unknown"
+        timestamp = datetime.datetime.now().isoformat()
+        
+        log_entry = {
+            "timestamp": timestamp,
+            "event_type": f"AUTH_{event_type}",
+            "auth_type": auth_type,
+            "user": user,
+            "ip_address": self.auth_ip,
+            "message": message
+        }
+        
+        # Log to application log
+        self.logger.info(f"AUTH: {json.dumps(log_entry)}")
+        
+        # Write to audit log file
+        try:
+            log_dir = os.path.expanduser("~/.guard/logs")
+            os.makedirs(log_dir, exist_ok=True)
+            
+            log_file = os.path.join(log_dir, "auth_audit.log")
+            with open(log_file, 'a') as f:
+                f.write(json.dumps(log_entry) + "\n")
+        except Exception as e:
+            self.logger.error(f"Failed to write to audit log: {str(e)}")
+            
+    def get_auth_token(self) -> Optional[str]:
+        """
+        Get the current authentication token for API requests.
+        
+        Returns:
+            Optional[str]: The authentication token or None if not authenticated
+        """
+        if not self.is_authenticated:
+            return None
+            
+        if self.auth_type == "aws_sso" and self.credentials:
+            # For AWS SSO, use the session token
+            return self.credentials.get('SessionToken')
+        else:
+            # For password auth, use our generated token
+            return self.session_token
+            
+    def get_auth_headers(self) -> Dict[str, str]:
+        """
+        Get authentication headers for API requests.
+        
+        Returns:
+            Dict[str, str]: Headers to include in API requests
+        """
+        headers = {}
+        
+        if self.is_authenticated:
+            # Add token to Authorization header
+            token = self.get_auth_token()
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+                
+            # Add user info
+            if self.user_id:
+                headers["X-User-ID"] = self.user_id
+                
+            # Add authentication type
+            if self.auth_type:
+                headers["X-Auth-Type"] = self.auth_type
+        
+        return headers

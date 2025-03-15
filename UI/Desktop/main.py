@@ -30,6 +30,7 @@ from PyQt5.QtWidgets import (
     QProgressBar, QStatusBar
 )
 from UI.Desktop.session_manager import SessionManager
+from API.auth_service import AuthService
 from PyQt5.QtGui import QIcon, QCursor, QGuiApplication
 from PyQt5.QtCore import Qt, QTimer, QDateTime
 
@@ -463,35 +464,33 @@ class PIIWindow(QMainWindow):
 
         dialog.exec_()
 
-    def process_request(self):
-        """
-        Process API request to get data.
+    # Example: Update process_request method
 
-        Returns:
-            DataFrame or None: The processed data or None if error
-        """
+    def process_request(self):
+        """Process API request to get data with authentication."""
         try:
-            response = requests.get(CONSTANTS.URL)
-            if response.status_code != 200:
-                QMessageBox.warning(
-                    self,
-                    "Error",
-                    f"Failed to fetch data from server. Status code: {response.status_code}"
-                )
+            if not hasattr(self, 'auth_manager') or not self.auth_manager.token:
+                QMessageBox.warning(self, "Error", "Not authenticated. Please connect first.")
                 return None
-            data = pd.DataFrame.from_records(response.json())
-            return data
-        except Exception as e:
-            QMessageBox.warning(
-                self,
-                "Error",
-                f"Failed to fetch data from server: {str(e)}"
+                
+            # Make authenticated request
+            success, data = self.auth_manager.make_authenticated_request(
+                method="GET",
+                endpoint="pii"
             )
+            
+            if not success:
+                QMessageBox.warning(self, "Error", f"Failed to fetch data: {data}")
+                return None
+                
+            return pd.DataFrame(data)
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to fetch data: {str(e)}")
             return None
 
     def insert_to_db(self, dialog, category, type_, pii):
         """
-        Insert new entry to the database.
+        Insert new entry to the database with authentication.
 
         Args:
             dialog (QDialog): The parent dialog
@@ -500,14 +499,27 @@ class PIIWindow(QMainWindow):
             pii (list): List of PII data items
         """
         try:
+            if not hasattr(self, 'auth_service'):
+                QMessageBox.warning(
+                    self,
+                    "Error",
+                    "Not authenticated. Please connect to the server first."
+                )
+                return
+                
             new_entry = {
                 "Category": category,
                 "Type": type_,
                 "PII": str(pii)
             }
-            response = requests.post(CONSTANTS.URL, json=new_entry)
-            if response.status_code == 200:
-                # We don't need to store the response data in this case
+            
+            success, response = self.auth_service.make_authenticated_request(
+                method="POST",
+                endpoint="pii",
+                data=new_entry
+            )
+            
+            if success:
                 QMessageBox.information(
                     self,
                     "Insertion Successful",
@@ -526,9 +538,9 @@ class PIIWindow(QMainWindow):
                 QMessageBox.warning(
                     self,
                     "Insertion Failed",
-                    f"Failed to insert new entry. Status code: {response.status_code}"
+                    f"Failed to insert new entry: {response}"
                 )
-        except (ValueError, SyntaxError) as e:
+        except Exception as e:
             QMessageBox.warning(
                 self,
                 "Invalid Input",
@@ -1055,13 +1067,33 @@ class PIIWindow(QMainWindow):
             self.btn_connect_server.clicked.connect(self.show_password_input)
 
     def connect_to_server(self):
-        """Connect to the backend server and set up the interface."""
+        """Connect to the backend server with enhanced security."""
         self.btn_connect_server.setDisabled(True)
         try:
-            # Get session token from session manager
-            if not hasattr(self, 'session_manager') or not self.session_manager.session_token:
-                raise ValueError("No valid session token available")
+            # Ensure we have a session manager
+            if not hasattr(self, 'session_manager') or not self.session_manager.is_authenticated:
+                raise ValueError("No valid session available")
+            
+            # Initialize the authentication service if not already done
+            if not hasattr(self, 'auth_service'):
+                self.auth_service = AuthService(
+                    api_base_url=CONSTANTS.API_BASE_URL,
+                    session_manager=self.session_manager
+                )
                 
+            # Authenticate based on the active auth type
+            if self.session_manager.auth_type == "aws_sso":
+                success, message = self.auth_service.authenticate_with_aws_sso()
+            else:  # password auth
+                # For password auth, we need to get a token from the API
+                success, message = self.auth_service.authenticate_with_password(
+                    username=os.environ.get('USER', 'default_user'),
+                    password=self.password_input.text()
+                )
+                
+            if not success:
+                raise ValueError(f"Authentication failed: {message}")
+            
             # Create agent with session token
             self.agent = Agent(
                 s3=CONSTANTS.AWS_S3,
@@ -1102,10 +1134,19 @@ class PIIWindow(QMainWindow):
             self.timer.timeout.connect(self.fetch_status)
             self.timer.start(1000)
 
-            # Get initial data
-            data = self.process_request()
-            if data is not None:
+            # Get initial data using the authenticated service
+            success, data = self.auth_service.make_authenticated_request(
+                method="GET",
+                endpoint="pii"
+            )
+            
+            if success and data is not None:
+                # Convert to DataFrame if needed
+                if not isinstance(data, pd.DataFrame):
+                    data = pd.DataFrame(data)
                 self.populate_data_table(data)
+            else:
+                raise ValueError(f"Failed to fetch data: {data}")
 
             # Update session display
             self.update_session_status()
@@ -1778,7 +1819,7 @@ class PIIWindow(QMainWindow):
         )
 
     def show_session_info(self):
-        """Show current session information."""
+        """Show current session information including API auth status."""
         if not hasattr(self, 'session_manager') or not self.session_manager.is_authenticated:
             QMessageBox.information(
                 self,
@@ -1789,70 +1830,57 @@ class PIIWindow(QMainWindow):
         
         session_info = self.session_manager.get_session_info()
         
+        # Add API authentication info if available
+        api_auth_info = ""
+        if hasattr(self, 'auth_service'):
+            user_info = self.auth_service.get_user_info()
+            if user_info.get("is_authenticated"):
+                api_auth_info = (
+                    f"\n\nAPI Authentication:\n"
+                    f"User ID: {user_info['user_id']}\n"
+                    f"Authentication Type: {user_info['auth_type']}\n"
+                    f"Token Expires: {user_info['token_expires_at']}"
+                )
+        
         QMessageBox.information(
             self,
             "Session Info",
+            f"Session Information:\n"
             f"User ID: {session_info['user_id']}\n"
             f"Authentication Type: {session_info['auth_type']}\n"
+            f"Session Started: {session_info['auth_timestamp']}\n"
+            f"Client IP: {session_info['auth_ip']}\n"
             f"Session Expires: {session_info['remaining_formatted']} from now\n"
             f"({session_info['expiration_time']})"
+            f"{api_auth_info}"
         )
 
-    ### Modifications for existing methods ###
+    # In the authenticate_and_connect method of UI/Desktop/main.py
 
-    # Update the authenticate_and_connect method:
     def authenticate_and_connect(self):
         """Authenticate user and connect to server."""
+        username = os.environ.get('USER', 'default_user')
         password = self.password_input.text()
-        env_password = CONSTANTS.APP_PASSWORD
-        self.btn_connect_server.setText('Logging in...')
-
-        if not env_password:
-            QMessageBox.warning(
-                self,
-                "Security Warning",
-                "Please Activate your Secure Environment before performing operations"
-            )
-            self.btn_connect_server.setText('Connect to Server')
-            self.btn_connect_server.setDisabled(False)
-            self.password_input.setHidden(True)
-            return
-
-        # Authenticate using password
-        hashed_env_password = hashlib.sha256(env_password.encode()).hexdigest()
-        auth_success = self.session_manager.authenticate_password(password, hashed_env_password)
         
-        if auth_success:
-            self.btn_connect_server.setStyleSheet(
-                "background-color: orange; color: white;"
-            )
-            self.password_input.clear()
-            self.password_input.setHidden(True)
+        # Initialize auth manager if not already done
+        if not hasattr(self, 'auth_manager'):
+            from UI.Desktop.auth_manager import AuthenticationManager
+            self.auth_manager = AuthenticationManager(self)
+        
+        # Attempt authentication
+        if self.auth_manager.authenticate_with_password(username, password):
+            # Authentication successful
             self.connect_to_server()
-            
-            # Update session status in UI
-            self.update_session_status()
-            
-            # Log successful authentication
-            session_info = self.session_manager.get_session_info()
-            timestamp = QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
+            self.password_input.clear()
             self.update_log(
-                timestamp,
-                f"Password authentication successful - Session valid for {session_info['remaining_formatted']}"
+                QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
+                f"Authentication successful for user: {self.auth_manager.user_id}"
             )
         else:
-            QMessageBox.warning(
-                self,
-                "Authentication Failed",
-                "Incorrect Password!"
-            )
-            self.password_input.clear()
+            # Authentication failed
             self.btn_connect_server.setText('Connect to Server')
             self.btn_connect_server.setDisabled(False)
-            self.btn_connect_server.clicked.disconnect(
-                self.authenticate_and_connect
-            )
-            self.btn_connect_server.clicked.connect(self.show_password_input)
+            self.password_input.clear()
 
     # Update the authenticate_with_sso method:
     def authenticate_with_sso(self):

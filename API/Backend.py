@@ -11,6 +11,9 @@ import ast
 import API.CONSTANTS as CONSTANTS
 from API.KMS import KMS
 from bson.objectid import ObjectId
+import uuid
+import json
+from datetime import datetime
 
 
 @dataclass(eq=False, repr=False, order=False)
@@ -23,18 +26,21 @@ class Agent:
         file_name (str): File name for data storage
         input_path (str): Path for request input
         stored_file_names (list): List of stored file names
+        auth_context (dict): Authentication context for tracking operations
     """
     s3: str
     file_name: str
     input_path: str = 'ReQuest.txt'
     session_token: str = None
     stored_file_names: list[str] = field(default_factory=list)
+    auth_context: dict = field(default_factory=dict)
 
     def __post_init__(self):
         """Initialize the Agent with necessary resources and connections."""
         # Change to the current directory
         os.chdir(os.path.dirname(os.path.realpath(__file__)))
         self.data_path = self.file_name
+        self.operation_id = str(uuid.uuid4())  # Track operation ID for audit
 
         self.status = {'Waking Up Mr.Agent...'}
         try:
@@ -59,9 +65,63 @@ class Agent:
             # Register cleanup handler
             atexit.register(self.end_work)
             self.chosen_one = None  # Initialize chosen_one attribute
+            
+            # Initialize security audit trail
+            self.audit_trail = []
         except Exception as e:
             print(f"Error in agent initialization: {e}")
             raise
+        
+    def set_auth_context(self, user_id: str, auth_type: str, client_ip: str = None):
+        """
+        Set authentication context for audit and operations.
+        
+        Args:
+            user_id (str): ID of the authenticated user
+            auth_type (str): Type of authentication used
+            client_ip (str, optional): Client IP address
+        """
+        self.auth_context = {
+            "user_id": user_id,
+            "auth_type": auth_type,
+            "client_ip": client_ip,
+            "session_id": str(uuid.uuid4()),
+            "login_time": datetime.now().isoformat()
+        }
+        
+        # Log the context for audit
+        self._log_security_event(
+            "AUTH_CONTEXT_SET", 
+            f"Authentication context set for user {user_id}"
+        )
+
+    def _log_security_event(self, event_type: str, message: str, details: dict = None):
+        """
+        Log a security event for audit purposes.
+        
+        Args:
+            event_type (str): Type of security event
+            message (str): Event message
+            details (dict, optional): Additional event details
+        """
+        event = {
+            "timestamp": datetime.now().isoformat(),
+            "operation_id": self.operation_id,
+            "event_type": event_type,
+            "message": message,
+            "user_id": self.auth_context.get("user_id", "unknown"),
+            "auth_type": self.auth_context.get("auth_type", "unknown"),
+            "client_ip": self.auth_context.get("client_ip", "unknown")
+        }
+        
+        if details:
+            event["details"] = details
+            
+        # Add to in-memory audit trail
+        self.audit_trail.append(event)
+        
+        # Log the event
+        print(f"SECURITY EVENT: {json.dumps(event)}")
     
     def validate_session(self):
         """Validate the session token."""
@@ -214,7 +274,7 @@ class Agent:
 
     def insert_new_data(self, item):
         """
-        Insert new data with encryption.
+        Insert new data with encryption and audit logging.
 
         Args:
             item (dict): Data to insert
@@ -222,25 +282,63 @@ class Agent:
         Returns:
             bool or Exception: True if successful, Exception if error
         """
-        print(item)
+        operation_id = str(uuid.uuid4())
         try:
+            self._log_security_event(
+                "DATA_INSERT_ATTEMPT", 
+                f"Attempting to insert data for category {item.get('Category')}", 
+                {"operation_id": operation_id}
+            )
+            
+            encrypted_pii = base64.b64encode(
+                self.cipher_suite.encrypt(
+                    item['PII'].encode('utf-8')
+                )
+            ).decode('utf-8')
+            
             item = {
                 '_id': str(ObjectId()),
                 'Category': item['Category'],
                 'Type': item['Type'],
-                'PII': base64.b64encode(self.cipher_suite.encrypt(item['PII'].encode('utf-8'))).decode('utf-8')
+                'PII': encrypted_pii
             }
-            print(item)
+            
             response = self.collection.put_item(Item=item)
-            print(response)
-            return response['ResponseMetadata']['HTTPStatusCode'] == 200
+            success = response['ResponseMetadata']['HTTPStatusCode'] == 200
+            
+            if success:
+                self._log_security_event(
+                    "DATA_INSERT_SUCCESS", 
+                    f"Successfully inserted data for category {item['Category']}",
+                    {
+                        "operation_id": operation_id,
+                        "item_id": item['_id'],
+                        "category": item['Category'],
+                        "type": item['Type']
+                    }
+                )
+            else:
+                self._log_security_event(
+                    "DATA_INSERT_FAILURE", 
+                    f"Failed to insert data for category {item['Category']}",
+                    {
+                        "operation_id": operation_id,
+                        "status_code": response['ResponseMetadata']['HTTPStatusCode']
+                    }
+                )
+                
+            return success
         except Exception as e:
-            print(e)
+            self._log_security_event(
+                "DATA_INSERT_ERROR", 
+                f"Error inserting data: {str(e)}",
+                {"operation_id": operation_id}
+            )
             return e
 
     def update_one_data(self, item):
         """
-        Update existing data.
+        Update existing data with audit logging.
 
         Args:
             item (dict): Data to update
@@ -248,25 +346,59 @@ class Agent:
         Returns:
             dict: Update response
         """
-        print(item)
-        updated_values = {"PII": self.kms_client.encrypt_to_base64(item['PII'])}
-        print(item)
-        item_id = item['_id']
-        update_expression = "SET " + \
-            ", ".join(f"{k} = :{k}" for k in updated_values.keys())
-        expression_values = {f":{k}": v for k, v in updated_values.items()}
+        operation_id = str(uuid.uuid4())
+        try:
+            self._log_security_event(
+                "DATA_UPDATE_ATTEMPT", 
+                f"Attempting to update data for ID {item.get('_id')}", 
+                {"operation_id": operation_id}
+            )
+            
+            encrypted_pii = self.kms_client.encrypt_to_base64(item['PII'])
+            updated_values = {"PII": encrypted_pii}
+            item_id = item['_id']
+            update_expression = "SET " + \
+                ", ".join(f"{k} = :{k}" for k in updated_values.keys())
+            expression_values = {f":{k}": v for k, v in updated_values.items()}
 
-        response = self.collection.update_item(
-            Key={"_id": item_id},
-            UpdateExpression=update_expression,
-            ExpressionAttributeValues=expression_values,
-            ReturnValues="UPDATED_NEW"
-        )
-        return response
+            response = self.collection.update_item(
+                Key={"_id": item_id},
+                UpdateExpression=update_expression,
+                ExpressionAttributeValues=expression_values,
+                ReturnValues="UPDATED_NEW"
+            )
+            
+            if 'Attributes' in response:
+                self._log_security_event(
+                    "DATA_UPDATE_SUCCESS", 
+                    f"Successfully updated data for ID {item_id}",
+                    {
+                        "operation_id": operation_id,
+                        "item_id": item_id
+                    }
+                )
+            else:
+                self._log_security_event(
+                    "DATA_UPDATE_FAILURE", 
+                    f"Failed to update data for ID {item_id}",
+                    {
+                        "operation_id": operation_id,
+                        "status_code": response.get('ResponseMetadata', {}).get('HTTPStatusCode')
+                    }
+                )
+                
+            return response
+        except Exception as e:
+            self._log_security_event(
+                "DATA_UPDATE_ERROR", 
+                f"Error updating data: {str(e)}",
+                {"operation_id": operation_id}
+            )
+            raise
 
     def delete_one_data(self, item):
         """
-        Delete data item.
+        Delete data item with audit logging.
 
         Args:
             item (dict): Item to delete
@@ -274,8 +406,91 @@ class Agent:
         Returns:
             bool: True if deletion successful
         """
-        response = self.collection.delete_item(Key={'_id': item['_id']})
-        return response.get('ResponseMetadata', {}).get('HTTPStatusCode') == 200
+        operation_id = str(uuid.uuid4())
+        try:
+            self._log_security_event(
+                "DATA_DELETE_ATTEMPT", 
+                f"Attempting to delete data for ID {item.get('_id')}", 
+                {"operation_id": operation_id}
+            )
+            
+            response = self.collection.delete_item(Key={'_id': item['_id']})
+            success = response.get('ResponseMetadata', {}).get('HTTPStatusCode') == 200
+            
+            if success:
+                self._log_security_event(
+                    "DATA_DELETE_SUCCESS", 
+                    f"Successfully deleted data for ID {item['_id']}",
+                    {
+                        "operation_id": operation_id,
+                        "item_id": item['_id'],
+                        "category": item.get('Category', 'unknown'),
+                        "type": item.get('Type', 'unknown')
+                    }
+                )
+            else:
+                self._log_security_event(
+                    "DATA_DELETE_FAILURE", 
+                    f"Failed to delete data for ID {item['_id']}",
+                    {
+                        "operation_id": operation_id,
+                        "status_code": response.get('ResponseMetadata', {}).get('HTTPStatusCode')
+                    }
+                )
+                
+            return success
+        except Exception as e:
+            self._log_security_event(
+                "DATA_DELETE_ERROR", 
+                f"Error deleting data: {str(e)}",
+                {"operation_id": operation_id}
+            )
+            raise
+
+    # Add method to export audit trail (for compliance purposes)
+    def export_audit_trail(self, file_path=None):
+        """
+        Export the security audit trail to a file.
+        
+        Args:
+            file_path (str, optional): Path to save the audit trail
+                If not provided, uses a default path
+                
+        Returns:
+            str: Path to the exported audit trail file
+        """
+        if not file_path:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            file_path = f"security_audit_{timestamp}.json"
+            
+        try:
+            # Add export event to trail
+            self._log_security_event(
+                "AUDIT_EXPORT", 
+                f"Exporting audit trail to {file_path}"
+            )
+            
+            # Write to file
+            with open(file_path, 'w') as f:
+                json.dump(self.audit_trail, f, indent=2)
+                
+            # Upload to S3 for secure storage
+            if self.s3:
+                s3_client = boto3.client('s3')
+                s3_key = f"audit_logs/{os.path.basename(file_path)}"
+                s3_client.upload_file(file_path, self.s3, s3_key)
+                
+                # Log the S3 upload
+                self._log_security_event(
+                    "AUDIT_EXPORT_S3", 
+                    f"Uploaded audit trail to S3: {self.s3}/{s3_key}"
+                )
+                
+            return file_path
+            
+        except Exception as e:
+            print(f"Error exporting audit trail: {e}")
+            return None
 
     def download_excel(self):
         """
