@@ -15,6 +15,7 @@ import time
 import uuid
 import pandas as pd
 import os
+from botocore.exceptions import ClientError
 from datetime import datetime
 
 # Configure logging
