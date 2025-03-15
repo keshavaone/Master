@@ -300,10 +300,22 @@ class AuthService:
         
         if self.token:
             if self.auth_type == "aws_sso":
-                # VERY IMPORTANT: auth_middleware.py expects the token to start with "AWS-"
-                # but strips this prefix before validating. We need to match this exactly.
+                # For AWS SSO, send both the token and the AWS credentials
                 headers["Authorization"] = f"Bearer AWS-{self.token}"
+                
+                # Add AWS credentials to headers for server-side validation
+                # Get from session manager if available
+                if hasattr(self, 'session_manager') and self.session_manager and self.session_manager.credentials:
+                    creds = self.session_manager.credentials
+                    headers["X-AWS-Access-Key-ID"] = creds.get('AccessKeyId', '')
+                    headers["X-AWS-Secret-Access-Key"] = creds.get('SecretAccessKey', '')
+                else:
+                    # Otherwise fall back to environment variables
+                    headers["X-AWS-Access-Key-ID"] = os.environ.get('AWS_ACCESS_KEY_ID', '')
+                    headers["X-AWS-Secret-Access-Key"] = os.environ.get('AWS_SECRET_ACCESS_KEY', '')
+                
                 self.logger.info(f"Using AWS SSO token format for user {self.user_id}")
+                self.logger.debug(f"Including AWS Access Key ID: {headers.get('X-AWS-Access-Key-ID', '')[:5]}...")
             else:
                 # For JWT tokens
                 headers["Authorization"] = f"Bearer {self.token}"
@@ -426,3 +438,71 @@ class AuthService:
             "token_expires_in": int(remaining_time),
             "token_expires_at": datetime.fromtimestamp(self.token_expiration).isoformat() if self.token_expiration else None
         }
+    
+    def authenticate_with_aws_sso_direct(self) -> Tuple[bool, str]:
+        """
+        Authenticate directly with AWS SSO credentials using a dedicated endpoint.
+        
+        This is a more reliable alternative to the standard AWS SSO authentication
+        that avoids token format issues by using a dedicated endpoint that directly
+        validates AWS credentials.
+        
+        Returns:
+            Tuple[bool, str]: (Success flag, message)
+        """
+        if not self.session_manager:
+            return False, "Session manager not available"
+        
+        try:
+            # Get the AWS credentials from the session manager
+            if not self.session_manager.credentials:
+                return False, "No AWS credentials available from session manager"
+            
+            creds = self.session_manager.credentials
+            
+            # Prepare request headers with AWS credentials
+            headers = {
+                "X-AWS-Access-Key-ID": creds.get('AccessKeyId', ''),
+                "X-AWS-Secret-Access-Key": creds.get('SecretAccessKey', ''),
+            }
+            
+            # Add session token if available
+            if 'SessionToken' in creds:
+                headers["X-AWS-Session-Token"] = creds.get('SessionToken', '')
+            
+            # Log the request (mask sensitive data)
+            self.logger.info(f"Making direct AWS SSO authentication request")
+            self.logger.debug(f"Using AWS Access Key ID: {headers['X-AWS-Access-Key-ID'][:4]}...")
+            
+            # Make request to the dedicated AWS SSO authentication endpoint
+            response = requests.post(
+                f"{self.api_base_url}/auth/aws-sso",
+                headers=headers
+            )
+            
+            # Check response
+            if response.status_code != 200:
+                error_msg = f"Direct AWS SSO authentication failed: {response.text}"
+                self.logger.error(error_msg)
+                return False, error_msg
+            
+            # Parse token response
+            token_data = response.json()
+            
+            # Set authentication state
+            self.token = token_data["access_token"]
+            self.user_id = token_data["user_id"]
+            self.auth_type = "aws_sso"
+            self.token_expiration = time.time() + token_data.get("expires_in", 3600)
+            
+            self.logger.info(f"Direct AWS SSO authentication successful for user: {self.user_id}")
+            return True, "Authentication successful"
+            
+        except requests.RequestException as e:
+            error_msg = f"API connection error: {str(e)}"
+            self.logger.error(error_msg)
+            return False, error_msg
+        except Exception as e:
+            error_msg = f"AWS SSO authentication error: {str(e)}"
+            self.logger.error(error_msg)
+            return False, error_msg

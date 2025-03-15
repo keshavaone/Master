@@ -158,13 +158,41 @@ class AuthDependency(HTTPBearer):
             Dict containing user information or None if invalid
         """
         try:
-            # Create STS client with the token
-            sts = boto3.client(
-                'sts',
-                aws_access_key_id=os.environ.get('AWS_ACCESS_KEY_ID', ''),
-                aws_secret_access_key=os.environ.get('AWS_SECRET_ACCESS_KEY', ''),
-                aws_session_token=token
-            )
+            # Get AWS credentials from environment - these should be set by the client
+            # during the AWS SSO authentication process
+            aws_access_key = os.environ.get('AWS_ACCESS_KEY_ID', '')
+            aws_secret_key = os.environ.get('AWS_SECRET_ACCESS_KEY', '')
+            
+            # When running in different processes, the environment variables 
+            # might not be shared properly
+            if not aws_access_key or not aws_secret_key:
+                logger.warning("AWS credentials environment variables not set properly")
+                # Try to get credentials from request headers instead
+                request = getattr(self, 'request', None)
+                if request:
+                    aws_access_key = request.headers.get('X-AWS-Access-Key-ID', '')
+                    aws_secret_key = request.headers.get('X-AWS-Secret-Access-Key', '')
+                    # We already have the token from the Authorization header
+            
+            # Log available credentials for debugging (mask secrets)
+            logger.debug(f"Using AWS Access Key: {aws_access_key[:4]}{'*' * 12 if aws_access_key else ''}")
+            logger.debug(f"Has AWS Secret Key: {bool(aws_secret_key)}")
+            
+            # Create STS client with the token and credentials if available
+            if aws_access_key and aws_secret_key:
+                # Use both provided credentials and token
+                sts = boto3.client(
+                    'sts',
+                    aws_access_key_id=aws_access_key,
+                    aws_secret_access_key=aws_secret_key,
+                    aws_session_token=token
+                )
+            else:
+                # Fall back to using only the token (less likely to work)
+                sts = boto3.client(
+                    'sts',
+                    aws_session_token=token
+                )
             
             # Check token validity by making a lightweight API call
             response = sts.get_caller_identity()
@@ -177,6 +205,7 @@ class AuthDependency(HTTPBearer):
                 "auth_type": "aws_sso"
             }
             
+            logger.info(f"Successfully validated AWS SSO token for user {user_info['sub']}")
             return user_info
             
         except ClientError as e:

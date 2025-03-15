@@ -45,6 +45,221 @@ handler = RotatingFileHandler(
     'application.log', maxBytes=1000000, backupCount=3)
 logging.basicConfig(handlers=[handler], level=logging.INFO)
 
+class CRUDHelper:
+    """
+    Helper class for consistent CRUD operations across the application.
+    
+    This class provides utility functions for extracting data from UI elements
+    and performing CRUD operations with proper validation and error handling.
+    """
+    
+    @staticmethod
+    def extract_row_data(table_widget, row_index):
+        """
+        Extract all column data from a specific row in a table widget.
+        
+        Args:
+            table_widget (QTableWidget): The table widget
+            row_index (int): The row index to extract data from
+            
+        Returns:
+            dict: A dictionary of column name: cell value pairs
+        """
+        row_data = {}
+        
+        # Check all columns in this row
+        for col in range(table_widget.columnCount()):
+            header = table_widget.horizontalHeaderItem(col)
+            if not header:
+                continue
+                
+            column_name = header.text()
+            cell_item = table_widget.item(row_index, col)
+            
+            if not cell_item:
+                continue
+                
+            # Store the cell value
+            row_data[column_name] = cell_item.text()
+            
+        return row_data
+    
+    @staticmethod
+    def validate_required_fields(data, required_fields, logger=None):
+        """
+        Validate that required fields exist in the data.
+        
+        Args:
+            data (dict): The data to validate
+            required_fields (list): List of field names that must exist
+            logger (callable, optional): Logging function
+            
+        Returns:
+            tuple: (is_valid, error_message)
+        """
+        if not isinstance(data, dict):
+            error_msg = f"Invalid data type: {type(data).__name__}, expected dict"
+            if logger:
+                logger(error_msg)
+            return False, error_msg
+            
+        missing_fields = [field for field in required_fields if field not in data or not data[field]]
+        
+        if missing_fields:
+            error_msg = f"Missing required fields: {', '.join(missing_fields)}"
+            if logger:
+                logger(error_msg)
+            return False, error_msg
+            
+        return True, ""
+    
+    @staticmethod
+    def perform_operation(operation, data, agent=None, auth_service=None, auth_manager=None, logger=None):
+        """
+        Perform a CRUD operation using available services.
+        
+        This method tries different services in order of preference:
+        1. Direct agent (if available)
+        2. auth_service (if available)
+        3. auth_manager (if available)
+        
+        Args:
+            operation (str): The operation to perform ('create', 'read', 'update', 'delete')
+            data (dict): The data to use for the operation
+            agent (object, optional): Agent object with CRUD methods
+            auth_service (object, optional): Authentication service
+            auth_manager (object, optional): Authentication manager
+            logger (callable, optional): Logging function
+            
+        Returns:
+            tuple: (success, result_or_error_message)
+        """
+        if logger:
+            logger(f"Performing {operation} operation")
+            
+        # Validate _id for update and delete operations
+        if operation in ('update', 'delete'):
+            valid, error_msg = CRUDHelper.validate_required_fields(data, ['_id'], logger)
+            if not valid:
+                return False, error_msg
+        
+        # Try agent first (most direct)
+        if agent:
+            try:
+                if logger:
+                    logger(f"Using agent.{operation}_one_data directly")
+                    
+                # Call the appropriate method based on operation
+                if operation == 'create':
+                    response = agent.insert_new_data(data)
+                elif operation == 'read':
+                    response = agent.get_all_data()
+                elif operation == 'update':
+                    response = agent.update_one_data(data)
+                elif operation == 'delete':
+                    response = agent.delete_one_data(data)
+                else:
+                    return False, f"Unknown operation: {operation}"
+                    
+                # Handle response
+                if response is True or (isinstance(response, dict) and 'error' not in response):
+                    if logger:
+                        logger(f"{operation.capitalize()} operation successful")
+                    return True, response
+                elif isinstance(response, dict) and 'error' in response:
+                    if logger:
+                        logger(f"Agent {operation} error: {response['error']}")
+                    # Continue to next method
+                else:
+                    if logger:
+                        logger(f"Agent {operation} returned: {response}")
+                    # Continue to next method
+            except Exception as e:
+                if logger:
+                    logger(f"Agent {operation} error: {str(e)}")
+                # Continue to next method
+        
+        # Try auth_service next
+        if auth_service:
+            try:
+                if logger:
+                    logger(f"Using auth_service for {operation} request")
+                    
+                # Map operation to HTTP method
+                method_map = {
+                    'create': 'POST',
+                    'read': 'GET',
+                    'update': 'PATCH',
+                    'delete': 'DELETE'
+                }
+                
+                # Make authenticated request
+                success, response_data = auth_service.make_authenticated_request(
+                    method=method_map[operation],
+                    endpoint="pii",
+                    data=data if operation != 'read' else None
+                )
+                
+                if success:
+                    if logger:
+                        logger(f"Auth service {operation} successful")
+                    return True, response_data
+                else:
+                    error_msg = response_data.get('error', str(response_data)) if isinstance(response_data, dict) else str(response_data)
+                    if logger:
+                        logger(f"Auth service {operation} failed: {error_msg}")
+                    
+                    # Only continue if we have auth_manager
+                    if auth_manager:
+                        # Continue to next method
+                        pass
+                    else:
+                        return False, error_msg
+            except Exception as e:
+                if logger:
+                    logger(f"Auth service {operation} error: {str(e)}")
+                # Continue to next method if we have auth_manager
+                if not auth_manager:
+                    return False, str(e)
+        
+        # Try auth_manager as last authenticated option
+        if auth_manager and auth_manager.token:
+            try:
+                if logger:
+                    logger(f"Using auth_manager for {operation} request")
+                    
+                # Map operation to HTTP method
+                method_map = {
+                    'create': 'POST',
+                    'read': 'GET',
+                    'update': 'PATCH',
+                    'delete': 'DELETE'
+                }
+                
+                # Make authenticated request
+                success, response_data = auth_manager.make_authenticated_request(
+                    method=method_map[operation],
+                    endpoint="pii",
+                    data=data if operation != 'read' else None
+                )
+                
+                if success:
+                    if logger:
+                        logger(f"Auth manager {operation} successful")
+                    return True, response_data
+                else:
+                    error_msg = response_data.get('error', str(response_data)) if isinstance(response_data, dict) else str(response_data)
+                    if logger:
+                        logger(f"Auth manager {operation} failed: {error_msg}")
+                    return False, error_msg
+            except Exception as e:
+                if logger:
+                    logger(f"Auth manager {operation} error: {str(e)}")
+                return False, str(e)
+        
+        # If we get here, all methods failed or weren't available
+        return False, "No suitable authentication method available"
+
 
 class PIIWindow(QMainWindow):
     """
@@ -472,27 +687,84 @@ class PIIWindow(QMainWindow):
 
         dialog.exec_()
 
-    # Example: Update process_request method
-
     def process_request(self):
         """Process API request to get data with authentication."""
         try:
-            if not hasattr(self, 'auth_manager') or not self.auth_manager.token:
+            # Check for auth_service first (preferred method)
+            if hasattr(self, 'auth_service'):
+                self.update_log(
+                    self.assistant.get_current_time() if hasattr(self, 'assistant') else
+                    QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
+                    "Using auth_service for API request"
+                )
+                # Make authenticated request
+                success, data = self.auth_service.make_authenticated_request(
+                    method="GET",
+                    endpoint="pii"
+                )
+                
+                if not success:
+                    if isinstance(data, dict) and 'error' in data:
+                        error_msg = data['error']
+                    else:
+                        error_msg = str(data)
+                        
+                    QMessageBox.warning(self, "Error", f"Failed to fetch data: {error_msg}")
+                    return None
+                    
+                # Convert to DataFrame if needed
+                if isinstance(data, list):
+                    return pd.DataFrame(data)
+                return data
+                
+            # Fall back to auth_manager
+            elif hasattr(self, 'auth_manager') and self.auth_manager.token:
+                self.update_log(
+                    self.assistant.get_current_time() if hasattr(self, 'assistant') else
+                    QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
+                    "Using auth_manager for API request"
+                )
+                
+                # Make authenticated request
+                success, data = self.auth_manager.make_authenticated_request(
+                    method="GET",
+                    endpoint="pii"
+                )
+                
+                if not success:
+                    QMessageBox.warning(self, "Error", f"Failed to fetch data: {data}")
+                    return None
+                    
+                # Convert to DataFrame if needed
+                if isinstance(data, list):
+                    return pd.DataFrame(data)
+                return data
+                
+            # Last resort: try to get data directly from agent
+            elif hasattr(self, 'agent') and self.agent:
+                self.update_log(
+                    self.assistant.get_current_time() if hasattr(self, 'assistant') else
+                    QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
+                    "Getting data directly from agent"
+                )
+                
+                data = self.agent.get_all_data()
+                
+                # Convert to DataFrame if needed
+                if isinstance(data, list):
+                    return pd.DataFrame(data)
+                return data
+                
+            else:
                 QMessageBox.warning(self, "Error", "Not authenticated. Please connect first.")
                 return None
                 
-            # Make authenticated request
-            success, data = self.auth_manager.make_authenticated_request(
-                method="GET",
-                endpoint="pii"
-            )
-            
-            if not success:
-                QMessageBox.warning(self, "Error", f"Failed to fetch data: {data}")
-                return None
-                
-            return pd.DataFrame(data)
         except Exception as e:
+            self.update_log(
+                self.assistant.get_current_time() if hasattr(self, 'assistant') else
+                QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
+                f"Error fetching data: {str(e)}"
+            )
             QMessageBox.warning(self, "Error", f"Failed to fetch data: {str(e)}")
             return None
 
@@ -566,27 +838,90 @@ class PIIWindow(QMainWindow):
             "Guard Data Download Attempted"
         )
         pre_download_time_stamp = time.time()
-        response = self.agent.download_excel()
-        download_time = time.time() - pre_download_time_stamp
-        self.update_log(
-            self.assistant.get_current_time(),
-            "Guard Data Download Time: %.2f Seconds" % download_time
-        )
-        self.update_log(
-            self.assistant.get_current_time(),
-            "Guard Data Download Function Response: " + str(response)
-        )
-        if response:
-            QMessageBox.information(
-                self,
-                "Download Complete",
-                "Data downloaded and decrypted successfully!"
+        
+        # Try to download using authenticated methods first
+        try:
+            # Try auth_service first
+            if hasattr(self, 'auth_service'):
+                self.update_log(
+                    self.assistant.get_current_time(),
+                    "Downloading data using auth_service"
+                )
+                
+                # Trigger Excel download via API endpoint
+                success, result = self.auth_service.make_authenticated_request(
+                    method="GET",
+                    endpoint="pii/download"  # Assuming you have a download endpoint
+                )
+                
+                if success:
+                    # Handle successful download
+                    download_time = time.time() - pre_download_time_stamp
+                    self.update_log(
+                        self.assistant.get_current_time(),
+                        "Guard Data Download Time: %.2f Seconds" % download_time
+                    )
+                    self.update_log(
+                        self.assistant.get_current_time(),
+                        "Guard Data Download Function Response: Success"
+                    )
+                    QMessageBox.information(
+                        self,
+                        "Download Complete",
+                        "Data downloaded and decrypted successfully!"
+                    )
+                    return
+                else:
+                    # Auth service method failed, continue to fallback methods
+                    self.update_log(
+                        self.assistant.get_current_time(),
+                        f"Auth service download failed, falling back to agent method: {result}"
+                    )
+        except Exception as e:
+            # Log error but continue to fallback method
+            self.update_log(
+                self.assistant.get_current_time(),
+                f"Auth service download error: {str(e)}, falling back to agent method"
             )
-        else:
-            QMessageBox.warning(
+        
+        # If we get here, try the agent's native download method
+        try:
+            response = self.agent.download_excel()
+            download_time = time.time() - pre_download_time_stamp
+            self.update_log(
+                self.assistant.get_current_time(),
+                "Guard Data Download Time: %.2f Seconds" % download_time
+            )
+            self.update_log(
+                self.assistant.get_current_time(),
+                "Guard Data Download Function Response: " + str(response)
+            )
+            if response:
+                QMessageBox.information(
+                    self,
+                    "Download Complete",
+                    "Data downloaded and decrypted successfully!"
+                )
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Download Failed",
+                    "Failed to download data!"
+                )
+        except Exception as e:
+            download_time = time.time() - pre_download_time_stamp
+            self.update_log(
+                self.assistant.get_current_time(),
+                "Guard Data Download Time: %.2f Seconds (Error)" % download_time
+            )
+            self.update_log(
+                self.assistant.get_current_time(),
+                f"Guard Data Download Error: {str(e)}"
+            )
+            QMessageBox.critical(
                 self,
-                "Download Failed",
-                "Failed to download data!"
+                "Download Error",
+                f"An error occurred during download: {str(e)}"
             )
 
     def show_password_input(self):
@@ -801,10 +1136,72 @@ class PIIWindow(QMainWindow):
             self.table_widget = QTableWidget()
             layout.addWidget(self.table_widget)
 
-            # Fetch and process data
+            # Fetch and process data using authenticated request
             try:
-                response = requests.get(CONSTANTS.URL)
-                data_frame = self.handle_data_response(response)
+                # Check if auth_service is available
+                if hasattr(self, 'auth_service'):
+                    self.update_log(
+                        self.assistant.get_current_time(),
+                        'Fetching data with auth_service.make_authenticated_request'
+                    )
+                    # Use authenticated request method
+                    success, data = self.auth_service.make_authenticated_request(
+                        method="GET",
+                        endpoint="pii"
+                    )
+                    
+                    if not success:
+                        raise ValueError(f"API request failed: {data}")
+                        
+                    # Convert to DataFrame if needed
+                    if isinstance(data, list):
+                        data_frame = pd.DataFrame(data)
+                    else:
+                        data_frame = data
+                # Fallback to auth_manager if available
+                elif hasattr(self, 'auth_manager') and self.auth_manager.is_authenticated():
+                    self.update_log(
+                        self.assistant.get_current_time(),
+                        'Fetching data with auth_manager.make_authenticated_request'
+                    )
+                    # Use authenticated request through auth_manager
+                    success, data = self.auth_manager.make_authenticated_request(
+                        method="GET",
+                        endpoint="pii"
+                    )
+                    
+                    if not success:
+                        raise ValueError(f"API request failed: {data}")
+                        
+                    # Convert to DataFrame if needed
+                    if isinstance(data, list):
+                        data_frame = pd.DataFrame(data)
+                    else:
+                        data_frame = data
+                # Last resort: use Agent directly (if it has the data)
+                elif self.agent:
+                    self.update_log(
+                        self.assistant.get_current_time(),
+                        'Fetching data directly from agent.get_all_data'
+                    )
+                    # Get data directly from agent
+                    data = self.agent.get_all_data()
+                    
+                    # Convert to DataFrame if needed
+                    if isinstance(data, list):
+                        data_frame = pd.DataFrame(data)
+                    else:
+                        data_frame = data
+                else:
+                    # If all else fails, try direct request with logged warning
+                    self.update_log(
+                        self.assistant.get_current_time(),
+                        'WARNING: No authentication service available, making direct request'
+                    )
+                    # Make direct request (likely to fail with 403)
+                    response = requests.get(CONSTANTS.URL)
+                    data_frame = self.handle_data_response(response)
+                    
             except json.JSONDecodeError as jde:
                 self.update_log(
                     self.assistant.get_current_time(),
@@ -914,6 +1311,10 @@ class PIIWindow(QMainWindow):
                 "Please run the Server. Application unable to detect SERVER"
             )
         except Exception as e:
+            self.update_log(
+                self.assistant.get_current_time(),
+                f'Unexpected error: {str(e)}'
+            )
             QMessageBox.critical(
                 self,
                 "Error",
@@ -927,21 +1328,37 @@ class PIIWindow(QMainWindow):
         Args:
             position: Position for the menu
         """
-        menu = QMenu()
+        try:
+            # Check if there are selected items
+            if not self.table_widget.selectedItems():
+                return
+                
+            # Create context menu
+            menu = QMenu()
 
-        copy_action = QAction('Copy', self)
-        copy_action.triggered.connect(self.copy_selected_row)
-        menu.addAction(copy_action)
+            # Add Copy action
+            copy_action = QAction('Copy', self)
+            copy_action.triggered.connect(self.copy_selected_row)
+            menu.addAction(copy_action)
 
-        edit_action = QAction('Edit', self)
-        edit_action.triggered.connect(self.edit_selected_row)
-        menu.addAction(edit_action)
+            # Add Edit action
+            edit_action = QAction('Edit', self)
+            edit_action.triggered.connect(self.edit_selected_row)
+            menu.addAction(edit_action)
 
-        delete_action = QAction('Delete', self)
-        delete_action.triggered.connect(self.delete_item)
-        menu.addAction(delete_action)
+            # Add Delete action
+            delete_action = QAction('Delete', self)
+            delete_action.triggered.connect(self.delete_item)
+            menu.addAction(delete_action)
 
-        menu.exec_(self.table_widget.viewport().mapToGlobal(position))
+            # Show the menu at the cursor position
+            menu.exec_(self.table_widget.viewport().mapToGlobal(position))
+            
+        except Exception as e:
+            self.update_log(
+                self.assistant.get_current_time(),
+                f"Error showing context menu: {str(e)}"
+            )
 
     def edit_selected_row(self):
         """Edit the selected row data."""
@@ -952,17 +1369,64 @@ class PIIWindow(QMainWindow):
         if not selected_items:
             return
 
+        # Log which row we're editing
         row = selected_items[0].row()
-        # Find the PII column
+        self.update_log(
+            self.assistant.get_current_time(),
+            f"Editing row {row}"
+        )
+        
+        # Verify row has an _id field
+        id_col = -1
         for col in range(self.table_widget.columnCount()):
-            header = self.table_widget.horizontalHeaderItem(col).text()
-            if header == 'PII':
+            header = self.table_widget.horizontalHeaderItem(col)
+            if header and header.text() == '_id':
+                id_col = col
+                break
+        
+        if id_col >= 0:
+            id_item = self.table_widget.item(row, id_col)
+            if id_item is None or not id_item.text():
+                self.update_log(
+                    self.assistant.get_current_time(),
+                    "Error: Selected row has no _id value"
+                )
+                QMessageBox.warning(
+                    self,
+                    "Edit Error",
+                    "Cannot edit this row because it has no ID value"
+                )
+                return
+                
+            self.update_log(
+                self.assistant.get_current_time(),
+                f"Row has ID: {id_item.text()}"
+            )
+        else:
+            self.update_log(
+                self.assistant.get_current_time(),
+                "Warning: Table does not have an _id column"
+            )
+
+        # Find the PII column
+        pii_col = -1
+        for col in range(self.table_widget.columnCount()):
+            header = self.table_widget.horizontalHeaderItem(col)
+            if header and header.text() == 'PII':
+                pii_col = col
                 item = self.table_widget.item(row, col)
                 break
-        else:
-            return  # PII column not found
-
-        if item is None:
+        
+        if pii_col == -1 or item is None:
+            self.update_log(
+                self.assistant.get_current_time(),
+                "Error: PII column not found or empty"
+            )
+            QMessageBox.warning(
+                self,
+                "Edit Error",
+                "Cannot find PII data to edit"
+            )
             return
 
         old_value = item.text()
@@ -1047,76 +1511,233 @@ class PIIWindow(QMainWindow):
 
     def process_edit_result(self, selected_items, item, edits):
         """
-        Process the result of editing PII data.
-
-        Args:
-            selected_items: Selected table items
-            item: The specific item being edited
-            edits: List of edit field pairs (name, data)
+        Process the result of editing PII data with improved ID handling.
         """
-        new_values = []
-        for item_name_edit, data_edit in edits:
-            new_item_name = item_name_edit.text()
-            new_data = data_edit.text()
-            new_values.append(f"{new_item_name} - {new_data}")
-
-        new_value = '\n'.join(new_values)
-        item.setText(new_value)
-
-        # Convert edited entries into JSON format
-        final_value_list = [
-            {"Item Name": item_name_edit.text(), "Data": data_edit.text()}
-            for item_name_edit, data_edit in edits
-        ]
-        final_value = json.dumps(final_value_list)
-
-        final_item = {}
-        for i in selected_items:
-            row = i.row()
-            column = i.column()
-            column_name = self.table_widget.horizontalHeaderItem(column).text()
-            final_item[column_name] = self.table_widget.item(
-                row, column).text()
-
-        final_item["PII"] = final_value.replace('"', "\'")
-        self.time_update_start_time = time.time()
-
         try:
-            response = requests.patch(CONSTANTS.URL, json=final_item)
-            if response.status_code == 200:
-                response_data = response.json()
-                update_time = time.time() - self.time_update_start_time
+            # Log start of update
+            self.update_log(
+                self.assistant.get_current_time(),
+                "Starting update process..."
+            )
+
+            # Format the edited data
+            new_values = []
+            for item_name_edit, data_edit in edits:
+                new_item_name = item_name_edit.text()
+                new_data = data_edit.text()
+                new_values.append(f"{new_item_name} - {new_data}")
+
+            # Update UI display with new values
+            new_value = '\n'.join(new_values)
+            item.setText(new_value)
+
+            # Convert edited entries into JSON format
+            final_value_list = [
+                {"Item Name": item_name_edit.text(), "Data": data_edit.text()}
+                for item_name_edit, data_edit in edits
+            ]
+            final_value = json.dumps(final_value_list)
+
+            # Extract data from selected row
+            row = selected_items[0].row()
+            update_data = {}
+            
+            # First, get all values from the row
+            for col in range(self.table_widget.columnCount()):
+                header = self.table_widget.horizontalHeaderItem(col)
+                if not header:
+                    continue
+                    
+                column_name = header.text()
+                cell_item = self.table_widget.item(row, col)
+                
+                if not cell_item:
+                    self.update_log(
+                        self.assistant.get_current_time(),
+                        f"Warning: Cell for column '{column_name}' is empty"
+                    )
+                    continue
+                    
+                # Store the cell value in our update data
+                update_data[column_name] = cell_item.text()
+            
+            # Validate _id field - this is critical
+            if '_id' not in update_data or not update_data['_id']:
                 self.update_log(
-                    self.assistant.get_current_time(),
-                    "Update Time: %.2f Seconds" % update_time
+                    self.assistant.get_current_time(), 
+                    "Error: No _id found in selected row"
                 )
-                self.update_log(
-                    self.assistant.get_current_time(),
-                    f"Update Function Response: {response_data}"
-                )
-                self.update_log(
-                    self.assistant.get_current_time(),
-                    f"Modified: {final_item['Category']}'s {final_item['Type']} - Guard Data"
-                )
-                self.modified = True
-                QMessageBox.information(
-                    self,
-                    "Update Successful",
-                    "Data updated successfully!"
-                )
-            else:
                 QMessageBox.warning(
-                    self,
-                    "Update Failed",
-                    f"Failed to update data! Status code: {response.status_code}"
+                    self, 
+                    "Update Error", 
+                    "Cannot update this record: No ID value found"
                 )
+                return
+
+            # Set updated PII value
+            update_data["PII"] = final_value.replace('"', "'")
+            
+            # Log the update data we're going to send
+            self.update_log(
+                self.assistant.get_current_time(),
+                f"Sending update for ID: {update_data['_id']}"
+            )
+            self.update_log(
+                self.assistant.get_current_time(),
+                f"Update data includes fields: {', '.join(update_data.keys())}"
+            )
+            
+            # Set timer for measuring update time
+            self.time_update_start_time = time.time()
+
+            # Try direct agent update first (most reliable)
+            if hasattr(self, 'agent') and self.agent:
+                try:
+                    self.update_log(
+                        self.assistant.get_current_time(),
+                        "Using agent.update_one_data directly"
+                    )
+                    
+                    # Create a minimal update payload with just the necessary fields
+                    minimal_update = {
+                        '_id': update_data['_id'],
+                        'Category': update_data.get('Category', ''),
+                        'Type': update_data.get('Type', ''),
+                        'PII': update_data['PII']
+                    }
+                    
+                    # Log what we're sending to update_one_data
+                    self.update_log(
+                        self.assistant.get_current_time(),
+                        f"Using minimal update data: {minimal_update}"
+                    )
+                    
+                    response = self.agent.update_one_data(minimal_update)
+                    
+                    update_time = time.time() - self.time_update_start_time
+                    self.update_log(
+                        self.assistant.get_current_time(),
+                        "Update Time: %.2f Seconds" % update_time
+                    )
+                    self.update_log(
+                        self.assistant.get_current_time(),
+                        f"Update Function Response: {response}"
+                    )
+                    self.modified = True
+                    QMessageBox.information(
+                        self,
+                        "Update Successful",
+                        "Data updated successfully!"
+                    )
+                    return
+                except Exception as e:
+                    # Log the error but continue to try other methods
+                    self.update_log(
+                        self.assistant.get_current_time(),
+                        f"Agent update_one_data error: {str(e)}"
+                    )
+            
+            # Fall back to auth_service if agent direct update failed
+            if hasattr(self, 'auth_service'):
+                self.update_log(
+                    self.assistant.get_current_time(),
+                    "Using auth_service for update request"
+                )
+                
+                # Make authenticated request with all fields in update_data
+                success, response_data = self.auth_service.make_authenticated_request(
+                    method="PATCH",
+                    endpoint="pii",
+                    data=update_data
+                )
+                
+                if success:
+                    update_time = time.time() - self.time_update_start_time
+                    self.update_log(
+                        self.assistant.get_current_time(),
+                        "Update Time: %.2f Seconds" % update_time
+                    )
+                    self.update_log(
+                        self.assistant.get_current_time(),
+                        f"Update Function Response: {response_data}"
+                    )
+                    self.modified = True
+                    QMessageBox.information(
+                        self,
+                        "Update Successful",
+                        "Data updated successfully!"
+                    )
+                    return
+                else:
+                    # Log the error but continue to try other methods
+                    error_msg = response_data.get('error', str(response_data)) if isinstance(response_data, dict) else str(response_data)
+                    self.update_log(
+                        self.assistant.get_current_time(),
+                        f"Auth service update failed: {error_msg}"
+                    )
+                    
+                    # Show error if this was our last resort
+                    if not hasattr(self, 'auth_manager') or not self.auth_manager.token:
+                        QMessageBox.warning(
+                            self,
+                            "Update Failed",
+                            f"Failed to update data: {error_msg}"
+                        )
+                        return
+            
+            # Fall back to auth_manager if other methods failed
+            if hasattr(self, 'auth_manager') and self.auth_manager.token:
+                self.update_log(
+                    self.assistant.get_current_time(),
+                    "Using auth_manager for update request"
+                )
+                
+                # Make authenticated request
+                success, response_data = self.auth_manager.make_authenticated_request(
+                    method="PATCH",
+                    endpoint="pii",
+                    data=update_data
+                )
+                
+                if success:
+                    update_time = time.time() - self.time_update_start_time
+                    self.update_log(
+                        self.assistant.get_current_time(),
+                        "Update Time: %.2f Seconds" % update_time
+                    )
+                    self.update_log(
+                        self.assistant.get_current_time(),
+                        f"Update Function Response: {response_data}"
+                    )
+                    self.modified = True
+                    QMessageBox.information(
+                        self,
+                        "Update Successful",
+                        "Data updated successfully!"
+                    )
+                else:
+                    error_msg = response_data.get('error', str(response_data)) if isinstance(response_data, dict) else str(response_data)
+                    QMessageBox.warning(
+                        self,
+                        "Update Failed",
+                        f"Failed to update data: {error_msg}"
+                    )
+                    self.update_log(
+                        self.assistant.get_current_time(),
+                        f"Update failed: {error_msg}"
+                    )
+                    
         except Exception as e:
             QMessageBox.critical(
                 self,
                 "Error",
                 f"An error occurred while updating: {str(e)}"
             )
-
+            self.update_log(
+                self.assistant.get_current_time(),
+                f"Update process error: {str(e)}"
+            )
+        
     def copy_selected_row(self):
         """Copy selected row data to clipboard."""
         if not hasattr(self, 'table_widget') or not self.table_widget:
@@ -1541,14 +2162,42 @@ class PIIWindow(QMainWindow):
 
         selected_item_text = selected_items[0].text()
         try:
-            sub_options = self.agent.get_sub_options_to_choose(
-                selected_item_text
-            )
+            # Log the selected category
             self.update_log(
                 self.assistant.get_current_time(),
                 f"Selected item: {selected_item_text}"
             )
 
+            # Get sub-options for the selected category
+            sub_options = self.agent.get_sub_options_to_choose(selected_item_text)
+            
+            # Ensure sub_options is a list of strings
+            if not isinstance(sub_options, list):
+                self.update_log(
+                    self.assistant.get_current_time(),
+                    f"Error: get_sub_options_to_choose returned non-list: {type(sub_options)}"
+                )
+                QMessageBox.warning(
+                    self,
+                    "Data Format Error",
+                    f"Unexpected data format for sub-options: {type(sub_options)}"
+                )
+                return
+                
+            # Ensure we have sub-options to display
+            if not sub_options:
+                self.update_log(
+                    self.assistant.get_current_time(),
+                    f"No sub-options found for {selected_item_text}"
+                )
+                QMessageBox.information(
+                    self,
+                    "No Sub-Options",
+                    f"No sub-options available for {selected_item_text}"
+                )
+                return
+
+            # Show dialog to select sub-option
             sub_option, ok_pressed = QInputDialog.getItem(
                 self,
                 "Choose Sub Option",
@@ -1564,13 +2213,22 @@ class PIIWindow(QMainWindow):
             )
 
             if ok_pressed and sub_option:
-                output = self.agent.get_final_output(sub_option)
+                # Get data for the selected sub-option
                 self.update_log(
                     self.assistant.get_current_time(),
                     f"Selected {selected_item_text}'s sub option: {sub_option}"
                 )
+                
+                # Get the output data
+                output = self.agent.get_final_output(sub_option)
+                
+                # Show the output data
                 self.show_output_dialog(sub_option, output)
         except Exception as e:
+            self.update_log(
+                self.assistant.get_current_time(),
+                f"Error processing selection: {str(e)}"
+            )
             QMessageBox.warning(
                 self,
                 "Selection Error",
@@ -1583,7 +2241,7 @@ class PIIWindow(QMainWindow):
 
         Args:
             sub_option (str): The selected sub-option
-            output (list): The output data to display
+            output (list or str): The output data to display
         """
         self.start_time = time.time()
         self.option = sub_option  # Store selected option for later reference
@@ -1603,7 +2261,12 @@ class PIIWindow(QMainWindow):
         dialog.closeEvent = on_close_event
 
         # Calculate the dialog size
-        num_items = len(output) if isinstance(output, list) else 1
+        # Ensure output is a list to safely calculate its length
+        if not isinstance(output, list):
+            # Convert to a list with a single item if it's not already a list
+            output = [output]
+            
+        num_items = len(output)
         item_height = 50  # Approximate height for each item
         base_height = 100  # Base height for dialog components
         width = 700  # Fixed width
@@ -1617,10 +2280,168 @@ class PIIWindow(QMainWindow):
 
         # Set up dialog layout
         dialog_layout = QVBoxLayout(dialog)
+        
+        # Log before setting up dialog content
+        self.update_log(
+            self.assistant.get_current_time(),
+            f"Setting up dialog for {self.option}, output type: {type(output)}, length: {len(output)}"
+        )
+        
         self.setup_dialog_content(dialog, dialog_layout, output)
 
         # Show dialog
         dialog.exec_()
+
+    def setup_dialog_content(self, dialog, dialog_layout, output):
+        """
+        Set up the content of the output dialog.
+
+        Args:
+            dialog: The dialog to set up
+            dialog_layout: Layout of the dialog
+            output: Data to display
+        """
+        # Set up scroll area
+        scroll_area = QScrollArea(dialog)
+        scroll_area.setWidgetResizable(True)
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+
+        # Process output data
+        try:
+            if isinstance(output, list):
+                if not output:
+                    # Empty list
+                    label = QLabel("No data available.", dialog)
+                    label.setWordWrap(True)
+                    scroll_layout.addWidget(label)
+                else:
+                    # Process each item in the list
+                    for i, item in enumerate(output):
+                        h_layout = QHBoxLayout()
+                        
+                        # Handle string items
+                        if isinstance(item, str):
+                            label = QLabel(item, dialog)
+                            label.setWordWrap(True)
+                            h_layout.addWidget(label)
+                            scroll_layout.addLayout(h_layout)
+                            scroll_layout.addSpacing(10)
+                        # Handle dictionary items
+                        elif isinstance(item, dict):
+                            self.add_dict_item_to_layout(dialog, h_layout, scroll_layout, item)
+                        # Handle other types
+                        else:
+                            label = QLabel(str(item), dialog)
+                            label.setWordWrap(True)
+                            h_layout.addWidget(label)
+                            scroll_layout.addLayout(h_layout)
+                            scroll_layout.addSpacing(10)
+            else:
+                # Handle non-list output (string, etc.)
+                label = QLabel(str(output), dialog)
+                label.setWordWrap(True)
+                scroll_layout.addWidget(label)
+        except Exception as e:
+            # Handle any errors that occur while processing output
+            error_label = QLabel(f"Error displaying data: {str(e)}", dialog)
+            error_label.setWordWrap(True)
+            error_label.setStyleSheet("color: red;")
+            scroll_layout.addWidget(error_label)
+            
+            # Log the error
+            self.update_log(
+                self.assistant.get_current_time(),
+                f"Error in setup_dialog_content: {str(e)}"
+            )
+
+        # Log display action
+        self.update_log(
+            self.assistant.get_current_time(),
+            f"Displaying... {self.option}"
+        )
+
+        # Set up scroll area
+        scroll_content.setLayout(scroll_layout)
+        scroll_area.setWidget(scroll_content)
+        dialog_layout.addWidget(scroll_area)
+
+        # Add close button
+        close_button = QPushButton('Close', dialog)
+        close_button.clicked.connect(dialog.close)
+        dialog_layout.addWidget(close_button)
+        dialog_layout.setAlignment(close_button, Qt.AlignRight)
+
+        # Add accept handler
+        def on_accept():
+            """Handle dialog acceptance."""
+            end_time = time.time()
+            duration = end_time - self.start_time
+            self.update_log(
+                self.assistant.get_current_time(),
+                f"{self.option}'s dialog was visible for {duration:.2f} seconds"
+            )
+            dialog.accept()
+
+        close_button.clicked.connect(on_accept)
+
+    def add_dict_item_to_layout(self, dialog, h_layout, scroll_layout, item):
+        """
+        Add a dictionary item to the dialog layout.
+
+        Args:
+            dialog: Parent dialog
+            h_layout: Horizontal layout to add to
+            scroll_layout: Scroll area layout
+            item: Dictionary item to add
+        """
+        # Handle dictionary items safely
+        try:
+            # Extract item data
+            item_name = str(item.get('Item Name', 'N/A'))
+            item_data = str(item.get('Data', 'N/A'))
+            
+            # Create label with item data
+            label = QLabel(f"{item_name} : {item_data}", dialog)
+            
+            # Create copy button
+            copy_button = QPushButton('Copy', dialog)
+            copy_button.setToolTip('Click to copy the data')
+            copy_button.setCursor(QCursor(Qt.PointingHandCursor))
+            
+            # Store button reference in item for later use
+            item_copy = item.copy()  # Make a copy to avoid modifying the original
+            item_copy["Button"] = copy_button
+            
+            # Connect button to copy function
+            copy_button.clicked.connect(
+                lambda checked, data=item_copy: self.copy_to_clipboard(data)
+            )
+            
+            # Style components
+            label.setWordWrap(True)
+            copy_button.setStyleSheet("background-color: White; color: Black;")
+            label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            
+            # Add to layout
+            h_layout.addWidget(label)
+            h_layout.addWidget(copy_button)
+            scroll_layout.addLayout(h_layout)
+            scroll_layout.addSpacing(10)
+        except Exception as e:
+            # Handle any errors that occur while adding the item
+            error_label = QLabel(f"Error displaying item: {str(e)}", dialog)
+            error_label.setWordWrap(True)
+            error_label.setStyleSheet("color: red;")
+            h_layout.addWidget(error_label)
+            scroll_layout.addLayout(h_layout)
+            scroll_layout.addSpacing(10)
+            
+            # Log the error
+            self.update_log(
+                self.assistant.get_current_time(),
+                f"Error in add_dict_item_to_layout: {str(e)}"
+            )
 
     def setup_dialog_content(self, dialog, dialog_layout, output):
         """
@@ -1808,31 +2629,46 @@ class PIIWindow(QMainWindow):
             self.data_table.setItem(row, 0, QTableWidgetItem(item))
 
     def delete_item(self):
-        """Delete the selected item from the database."""
+        """Delete the selected item using the CRUD Helper."""
         if not hasattr(self, 'table_widget') or not self.table_widget:
-            QMessageBox.warning(
-                self,
-                "Delete Error",
-                "Data table not available."
-            )
+            QMessageBox.warning(self, "Delete Error", "Data table not available.")
             return
 
         selected_items = self.table_widget.selectedItems()
         if not selected_items:
-            QMessageBox.warning(
-                self,
-                "Delete Error",
-                "No item selected to delete."
-            )
+            QMessageBox.warning(self, "Delete Error", "No item selected to delete.")
             return
 
-        # Get item information from table
-        item_info = self.get_item_info_from_selection(selected_items)
-        if not self.confirm_delete(item_info):
+        # Extract row data
+        row = selected_items[0].row()
+        delete_data = CRUDHelper.extract_row_data(self.table_widget, row)
+        
+        # Log the delete attempt
+        self.update_log(
+            self.assistant.get_current_time(),
+            f"Attempting to delete item with ID: {delete_data.get('_id', 'unknown')}"
+        )
+        
+        # Confirm deletion
+        if not self.confirm_delete(delete_data):
             return
-
-        # Perform deletion
-        self.perform_delete_operation(item_info, selected_items[0].row())
+        
+        # Use CRUD Helper to perform the operation
+        success, response = CRUDHelper.perform_operation(
+            'delete',
+            delete_data,
+            agent=self.agent if hasattr(self, 'agent') else None,
+            auth_service=self.auth_service if hasattr(self, 'auth_service') else None,
+            auth_manager=self.auth_manager if hasattr(self, 'auth_manager') else None,
+            logger=lambda msg: self.update_log(self.assistant.get_current_time(), msg)
+        )
+        
+        if success:
+            QMessageBox.information(self, "Deletion Complete", "Item deleted successfully!")
+            self.table_widget.removeRow(row)
+            self.modified = True
+        else:
+            QMessageBox.warning(self, "Delete Failed", f"Failed to delete item: {response}")
 
     def get_item_info_from_selection(self, selected_items):
         """
@@ -1845,22 +2681,56 @@ class PIIWindow(QMainWindow):
             dict: Item information
         """
         item_info = {'Category': '', 'Type': '', '_id': ''}
+        
+        if not selected_items:
+            return item_info
+            
+        # Get the row of the first selected item
         row = selected_items[0].row()
-
-        # Find Category, Type and _id columns
+        
+        # Log what row we're examining
+        self.update_log(
+            self.assistant.get_current_time(),
+            f"Extracting info from row {row}"
+        )
+        
+        # Check all columns in this row
         for column in range(self.table_widget.columnCount()):
-            header = self.table_widget.horizontalHeaderItem(column).text()
-            item = self.table_widget.item(row, column)
-            if not item:
+            header = self.table_widget.horizontalHeaderItem(column)
+            if not header:
                 continue
-
-            if header == 'Category':
-                item_info['Category'] = item.text()
-            elif header == 'Type':
-                item_info['Type'] = item.text()
-            elif header == '_id':
-                item_info['_id'] = item.text()
-
+                
+            column_name = header.text()
+            cell_item = self.table_widget.item(row, column)
+            
+            if not cell_item:
+                self.update_log(
+                    self.assistant.get_current_time(),
+                    f"Warning: Cell for column '{column_name}' is empty"
+                )
+                continue
+                
+            cell_value = cell_item.text()
+            
+            # Store values for key fields
+            if column_name in item_info:
+                item_info[column_name] = cell_value
+                
+        # Log what we found
+        field_info = ", ".join([f"{k}: {v}" for k, v in item_info.items() if v])
+        self.update_log(
+            self.assistant.get_current_time(),
+            f"Extracted fields: {field_info}"
+        )
+        
+        # Check if we have the essential fields
+        missing_fields = [k for k, v in item_info.items() if not v]
+        if missing_fields:
+            self.update_log(
+                self.assistant.get_current_time(),
+                f"Warning: Missing fields: {', '.join(missing_fields)}"
+            )
+        
         return item_info
 
     def confirm_delete(self, item_info):

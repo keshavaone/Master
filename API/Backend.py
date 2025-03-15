@@ -243,23 +243,104 @@ class Agent:
 
     def get_all_data(self):
         """
-        Get all data with decryption.
+        Get all data with decryption and error handling.
 
         Returns:
-            DataFrame: All decrypted data
+            List[Dict]: All decrypted data as a list of dictionaries
         """
-        df = self.refresh_data()
-        self.__df = df.copy()
-        for i in df.index:
-            if df.loc[i, 'Type'] == 'KeyID':
-                pass
-            else:
+        try:
+            # Get data from DynamoDB
+            df = self.refresh_data()
+            
+            # Store a copy for later use
+            self.__df = df.copy()
+            
+            # If DataFrame is empty, return empty list
+            if df.empty:
+                self._log_security_event(
+                    "DATA_RETRIEVAL_WARNING", 
+                    "Retrieved empty dataset from DynamoDB"
+                )
+                return []
+            
+            # Process each row
+            for i in df.index:
                 try:
-                    df.loc[i, 'PII'] = self.kms_client.decrypt_data(
-                        self.filter_from_db(df.loc[i, 'Type']))
-                except Exception as e:
-                    df.loc[i, 'PII'] = 'Data may have inserted in the current session. please restart to see this entry'
-        return df
+                    if df.loc[i, 'Type'] == 'KeyID':
+                        # Skip key IDs as they don't need decryption
+                        pass
+                    else:
+                        # Handle KeyPassword with special care
+                        if df.loc[i, 'Type'] == 'KeyPassword':
+                            try:
+                                # Special handling for KeyPassword
+                                encrypted_data = self.filter_from_db(df.loc[i, 'Type'])
+                                if encrypted_data:
+                                    decrypted = self.decrypt_data(encrypted_data)
+                                    df.loc[i, 'PII'] = decrypted or "Could not decrypt key password - please reset"
+                                else:
+                                    df.loc[i, 'PII'] = "Key password data not found"
+                            except Exception as key_error:
+                                self._log_security_event(
+                                    "KEY_PASSWORD_DECRYPTION_ERROR", 
+                                    f"Error with key password: {str(key_error)}"
+                                )
+                                df.loc[i, 'PII'] = "Error in key password - system may need maintenance"
+                        else:
+                            # Regular decryption for other types
+                            try:
+                                encrypted_data = self.filter_from_db(df.loc[i, 'Type'])
+                                if encrypted_data:
+                                    decrypted = self.decrypt_data(encrypted_data)
+                                    if decrypted:
+                                        df.loc[i, 'PII'] = decrypted
+                                    else:
+                                        df.loc[i, 'PII'] = "Data could not be decrypted"
+                                else:
+                                    df.loc[i, 'PII'] = "No data found for this type"
+                            except Exception as e:
+                                self._log_security_event(
+                                    "DATA_DECRYPTION_ERROR", 
+                                    f"Error decrypting data for Type={df.loc[i, 'Type']}: {str(e)}"
+                                )
+                                df.loc[i, 'PII'] = 'Data may have been inserted in the current session. Please restart to see this entry'
+                except Exception as row_error:
+                    # Handle errors for individual rows without failing the entire operation
+                    self._log_security_event(
+                        "ROW_PROCESSING_ERROR", 
+                        f"Error processing row {i}: {str(row_error)}"
+                    )
+                    # Try to provide as much info as possible about the problematic row
+                    try:
+                        row_type = df.loc[i, 'Type'] if 'Type' in df.columns and i < len(df) else "unknown"
+                        self._log_security_event(
+                            "ROW_DATA", 
+                            f"Problem row type: {row_type}"
+                        )
+                    except:
+                        pass
+                    
+                    # Keep going with other rows
+                    continue
+            
+            # Convert DataFrame to list of dictionaries for API response
+            result = df.to_dict(orient='records')
+            
+            # Log success
+            self._log_security_event(
+                "DATA_RETRIEVAL_SUCCESS", 
+                f"Successfully retrieved and processed {len(result)} records"
+            )
+            
+            return result
+            
+        except Exception as e:
+            self._log_security_event(
+                "DATA_RETRIEVAL_ERROR", 
+                f"Error retrieving data: {str(e)}"
+            )
+            # Return empty list on error
+            return []
 
     def get_one_data(self):
         """
@@ -338,114 +419,234 @@ class Agent:
 
     def update_one_data(self, item):
         """
-        Update existing data with audit logging.
+        Update existing data with improved error handling and audit logging.
 
         Args:
             item (dict): Data to update
 
         Returns:
-            dict: Update response
+            dict: Update response or error message
         """
         operation_id = str(uuid.uuid4())
         try:
+            # Validate input
+            if not isinstance(item, dict):
+                error_msg = f"Invalid item type: {type(item)}, expected dict"
+                self._log_security_event(
+                    "DATA_UPDATE_ERROR", 
+                    error_msg,
+                    {"operation_id": operation_id}
+                )
+                return {"error": error_msg}
+                
+            # Check for _id field
+            item_id = item.get('_id')
+            if not item_id:
+                error_msg = "Missing required field: _id"
+                self._log_security_event(
+                    "DATA_UPDATE_ERROR", 
+                    error_msg,
+                    {"operation_id": operation_id}
+                )
+                return {"error": error_msg}
+                
+            # Log update attempt
             self._log_security_event(
                 "DATA_UPDATE_ATTEMPT", 
-                f"Attempting to update data for ID {item.get('_id')}", 
+                f"Attempting to update data for ID {item_id}", 
                 {"operation_id": operation_id}
             )
             
-            encrypted_pii = self.kms_client.encrypt_to_base64(item['PII'])
-            updated_values = {"PII": encrypted_pii}
-            item_id = item['_id']
-            update_expression = "SET " + \
-                ", ".join(f"{k} = :{k}" for k in updated_values.keys())
-            expression_values = {f":{k}": v for k, v in updated_values.items()}
-
-            response = self.collection.update_item(
-                Key={"_id": item_id},
-                UpdateExpression=update_expression,
-                ExpressionAttributeValues=expression_values,
-                ReturnValues="UPDATED_NEW"
-            )
-            
-            if 'Attributes' in response:
+            # Check for PII field
+            if 'PII' not in item:
+                error_msg = "Missing required field: PII"
                 self._log_security_event(
-                    "DATA_UPDATE_SUCCESS", 
-                    f"Successfully updated data for ID {item_id}",
-                    {
-                        "operation_id": operation_id,
-                        "item_id": item_id
-                    }
+                    "DATA_UPDATE_ERROR", 
+                    error_msg,
+                    {"operation_id": operation_id}
                 )
-            else:
+                return {"error": error_msg}
+                
+            # Encrypt PII data
+            try:
+                encrypted_pii = self.kms_client.encrypt_to_base64(item['PII'])
+                if not encrypted_pii:
+                    error_msg = "Failed to encrypt PII data"
+                    self._log_security_event(
+                        "DATA_UPDATE_ERROR", 
+                        error_msg,
+                        {"operation_id": operation_id}
+                    )
+                    return {"error": error_msg}
+            except Exception as e:
+                error_msg = f"Encryption error: {str(e)}"
                 self._log_security_event(
-                    "DATA_UPDATE_FAILURE", 
-                    f"Failed to update data for ID {item_id}",
-                    {
-                        "operation_id": operation_id,
-                        "status_code": response.get('ResponseMetadata', {}).get('HTTPStatusCode')
-                    }
+                    "DATA_UPDATE_ERROR", 
+                    error_msg,
+                    {"operation_id": operation_id}
+                )
+                return {"error": error_msg}
+                
+            # Set up update operation
+            updated_values = {"PII": encrypted_pii}
+            update_expression = "SET " + ", ".join(f"{k} = :{k}" for k in updated_values.keys())
+            expression_values = {f":{k}": v for k, v in updated_values.items()}
+            
+            # Log update details
+            self._log_security_event(
+                "DATA_UPDATE_DETAILS", 
+                f"Updating PII for item ID {item_id}",
+                {
+                    "operation_id": operation_id,
+                    "item_id": item_id,
+                    "expression": update_expression,
+                    "has_encrypted_pii": bool(encrypted_pii)
+                }
+            )
+
+            # Perform update with error handling
+            try:
+                response = self.collection.update_item(
+                    Key={"_id": item_id},
+                    UpdateExpression=update_expression,
+                    ExpressionAttributeValues=expression_values,
+                    ReturnValues="UPDATED_NEW"
                 )
                 
-            return response
+                # Log success
+                if 'Attributes' in response:
+                    self._log_security_event(
+                        "DATA_UPDATE_SUCCESS", 
+                        f"Successfully updated data for ID {item_id}",
+                        {
+                            "operation_id": operation_id,
+                            "item_id": item_id
+                        }
+                    )
+                else:
+                    self._log_security_event(
+                        "DATA_UPDATE_WARNING", 
+                        f"Update completed but no attributes returned for ID {item_id}",
+                        {
+                            "operation_id": operation_id,
+                            "item_id": item_id,
+                            "status_code": response.get('ResponseMetadata', {}).get('HTTPStatusCode')
+                        }
+                    )
+                    
+                return response
+            except Exception as e:
+                error_msg = f"DynamoDB update error: {str(e)}"
+                self._log_security_event(
+                    "DATA_UPDATE_ERROR", 
+                    error_msg,
+                    {"operation_id": operation_id, "item_id": item_id}
+                )
+                return {"error": error_msg}
+                    
         except Exception as e:
+            error_msg = f"Error updating data: {str(e)}"
             self._log_security_event(
                 "DATA_UPDATE_ERROR", 
-                f"Error updating data: {str(e)}",
+                error_msg,
                 {"operation_id": operation_id}
             )
-            raise
+            return {"error": error_msg}
 
     def delete_one_data(self, item):
         """
-        Delete data item with audit logging.
+        Delete data item with robust error handling and audit logging.
 
         Args:
-            item (dict): Item to delete
+            item (dict): Item to delete containing at least the _id field
 
         Returns:
-            bool: True if deletion successful
+            bool: True if deletion successful, or dict with error details
         """
         operation_id = str(uuid.uuid4())
         try:
+            # Validate input
+            if not isinstance(item, dict):
+                error_msg = f"Invalid item type: {type(item)}, expected dict"
+                self._log_security_event(
+                    "DATA_DELETE_ERROR", 
+                    error_msg,
+                    {"operation_id": operation_id}
+                )
+                return {"error": error_msg}
+                
+            # Check for _id field
+            item_id = item.get('_id')
+            if not item_id:
+                error_msg = "Missing required field: _id"
+                self._log_security_event(
+                    "DATA_DELETE_ERROR", 
+                    error_msg,
+                    {"operation_id": operation_id}
+                )
+                return {"error": error_msg}
+                
+            # Log delete attempt with ID
             self._log_security_event(
                 "DATA_DELETE_ATTEMPT", 
-                f"Attempting to delete data for ID {item.get('_id')}", 
+                f"Attempting to delete data for ID {item_id}", 
                 {"operation_id": operation_id}
             )
             
-            response = self.collection.delete_item(Key={'_id': item['_id']})
-            success = response.get('ResponseMetadata', {}).get('HTTPStatusCode') == 200
+            # Add more contextual info to the log if available
+            log_details = {
+                "operation_id": operation_id,
+                "item_id": item_id
+            }
             
-            if success:
-                self._log_security_event(
-                    "DATA_DELETE_SUCCESS", 
-                    f"Successfully deleted data for ID {item['_id']}",
-                    {
-                        "operation_id": operation_id,
-                        "item_id": item['_id'],
-                        "category": item.get('Category', 'unknown'),
-                        "type": item.get('Type', 'unknown')
-                    }
-                )
-            else:
-                self._log_security_event(
-                    "DATA_DELETE_FAILURE", 
-                    f"Failed to delete data for ID {item['_id']}",
-                    {
-                        "operation_id": operation_id,
-                        "status_code": response.get('ResponseMetadata', {}).get('HTTPStatusCode')
-                    }
+            # Add category and type if available
+            if 'Category' in item:
+                log_details["category"] = item['Category']
+            if 'Type' in item:
+                log_details["type"] = item['Type']
+
+            # Perform deletion with error handling
+            try:
+                response = self.collection.delete_item(
+                    Key={'_id': item_id},
+                    ReturnValues="ALL_OLD"  # Get the deleted item for logging
                 )
                 
-            return success
+                # Check if something was actually deleted
+                if 'Attributes' in response and response['Attributes']:
+                    self._log_security_event(
+                        "DATA_DELETE_SUCCESS", 
+                        f"Successfully deleted data for ID {item_id}",
+                        log_details
+                    )
+                    return True
+                else:
+                    # Item may not have existed
+                    self._log_security_event(
+                        "DATA_DELETE_WARNING", 
+                        f"Delete operation completed but no item found with ID {item_id}",
+                        log_details
+                    )
+                    # Still return True as the operation didn't fail
+                    return True
+                    
+            except Exception as e:
+                error_msg = f"DynamoDB delete error: {str(e)}"
+                self._log_security_event(
+                    "DATA_DELETE_ERROR", 
+                    error_msg,
+                    log_details
+                )
+                return {"error": error_msg}
+                    
         except Exception as e:
+            error_msg = f"Error deleting data: {str(e)}"
             self._log_security_event(
                 "DATA_DELETE_ERROR", 
-                f"Error deleting data: {str(e)}",
+                error_msg,
                 {"operation_id": operation_id}
             )
-            raise
+            return {"error": error_msg}
 
     # Add method to export audit trail (for compliance purposes)
     def export_audit_trail(self, file_path=None):
@@ -524,31 +725,181 @@ class Agent:
         Returns:
             list: List of unique types for the category
         """
-        df = self.get_all_data()
-        df = df[df['Category'] == category]
-        self.chosen_one = category
-        return list(set(df['Type'].to_list()))
+        try:
+            # Log the operation for debugging
+            self._log_security_event(
+                "CATEGORY_SELECTION", 
+                f"Getting sub-options for category: {category}"
+            )
+            
+            # Get all data from the database
+            df = self.get_all_data()
+            
+            # Handle different return types from get_all_data
+            if isinstance(df, pd.DataFrame):
+                # Standard case - we have a DataFrame
+                # Filter the DataFrame by category
+                df = df[df['Category'] == category]
+                self.chosen_one = category
+                
+                # Get unique types and convert to a list of strings
+                if 'Type' in df.columns:
+                    return [str(t) for t in df['Type'].unique() if t is not None]
+                else:
+                    self._log_security_event(
+                        "FORMAT_ERROR", 
+                        f"DataFrame does not have a 'Type' column"
+                    )
+                    return []
+                    
+            elif isinstance(df, list):
+                # Handle case where get_all_data returns a list of dictionaries
+                filtered_items = []
+                for item in df:
+                    # Ensure item is a dictionary
+                    if not isinstance(item, dict):
+                        continue
+                        
+                    # Check if the item matches the category
+                    if item.get('Category') == category:
+                        # Add the Type to our results if it's not None and not already in the list
+                        item_type = item.get('Type')
+                        if item_type is not None and item_type not in filtered_items:
+                            filtered_items.append(str(item_type))
+                
+                self.chosen_one = category
+                return filtered_items
+            else:
+                # Unknown return type
+                self._log_security_event(
+                    "FORMAT_ERROR", 
+                    f"get_all_data returned unknown type: {type(df)}"
+                )
+                return []
+                
+        except Exception as e:
+            self._log_security_event(
+                "DATA_ACCESS_ERROR", 
+                f"Error getting sub-options for {category}: {str(e)}"
+            )
+            return []
 
-    def get_final_output(self, type):
+    def get_final_output(self, type_value):
         """
         Get final output for a specific type.
 
         Args:
-            type (str): Type to get output for
+            type_value (str): Type to get output for
 
         Returns:
             Various: The parsed output
         """
-        df = self.get_all_data()
-        df = df[df['Category'] == self.chosen_one]
-        df = df[df['Type'] == type]
         try:
-            return ast.literal_eval(df['PII'].iloc[0])
-        except:
-            try:
-                return ast.literal_eval(df['PII'].iloc[0].replace('\n', ' THIS_IS_NEW_LINE '))
-            except:
-                return df['PII'].iloc[0]
+            # Log the operation for debugging
+            self._log_security_event(
+                "TYPE_SELECTION", 
+                f"Getting data for type: {type_value}"
+            )
+            
+            # Make sure chosen_one is set
+            if not hasattr(self, 'chosen_one') or self.chosen_one is None:
+                self._log_security_event(
+                    "DATA_ACCESS_ERROR", 
+                    "No category selected (chosen_one is None)"
+                )
+                return ["No category selected. Please select a category first."]
+                
+            # Get all data
+            df = self.get_all_data()
+            
+            # Handle different return types from get_all_data
+            if isinstance(df, pd.DataFrame):
+                # Standard case - we have a DataFrame
+                # Filter by category and type
+                df = df[df['Category'] == self.chosen_one]
+                df = df[df['Type'] == type_value]
+                
+                # Check if we have results
+                if df.empty:
+                    self._log_security_event(
+                        "DATA_ACCESS_ERROR", 
+                        f"No data found for category={self.chosen_one}, type={type_value}"
+                    )
+                    return ["No data found for this selection."]
+                    
+                # Get the PII data
+                try:
+                    pii_data = df['PII'].iloc[0]
+                    
+                    # Try to parse the PII data as a list of dictionaries
+                    try:
+                        return ast.literal_eval(pii_data)
+                    except (ValueError, SyntaxError):
+                        # Try again with newlines replaced
+                        try:
+                            return ast.literal_eval(pii_data.replace('\n', ' THIS_IS_NEW_LINE '))
+                        except (ValueError, SyntaxError):
+                            # Return the raw string if parsing fails
+                            return [{"Item Name": "Raw Data", "Data": pii_data}]
+                except (IndexError, KeyError) as e:
+                    self._log_security_event(
+                        "DATA_ACCESS_ERROR", 
+                        f"Error accessing PII data: {str(e)}"
+                    )
+                    return ["Error accessing data."]
+                    
+            elif isinstance(df, list):
+                # Handle case where get_all_data returns a list of dictionaries
+                matching_items = []
+                
+                for item in df:
+                    # Ensure item is a dictionary
+                    if not isinstance(item, dict):
+                        continue
+                        
+                    # Check if the item matches both category and type
+                    if item.get('Category') == self.chosen_one and item.get('Type') == type_value:
+                        # Get the PII data
+                        pii_data = item.get('PII')
+                        if pii_data:
+                            # Try to parse the PII data
+                            try:
+                                return ast.literal_eval(pii_data)
+                            except (ValueError, SyntaxError):
+                                # Try again with newlines replaced
+                                try:
+                                    return ast.literal_eval(pii_data.replace('\n', ' THIS_IS_NEW_LINE '))
+                                except (ValueError, SyntaxError):
+                                    # Return as a simple dict if parsing fails
+                                    return [{"Item Name": "Raw Data", "Data": pii_data}]
+                        else:
+                            matching_items.append({"Item Name": "Error", "Data": "No PII data found"})
+                
+                # If we found matching items but couldn't return earlier
+                if matching_items:
+                    return matching_items
+                    
+                # If we didn't find any matching items
+                self._log_security_event(
+                    "DATA_ACCESS_ERROR", 
+                    f"No data found for category={self.chosen_one}, type={type_value}"
+                )
+                return ["No data found for this selection."]
+                
+            else:
+                # Unknown return type
+                self._log_security_event(
+                    "FORMAT_ERROR", 
+                    f"get_all_data returned unknown type: {type(df)}"
+                )
+                return ["Error: Unexpected data format."]
+                
+        except Exception as e:
+            self._log_security_event(
+                "DATA_ACCESS_ERROR", 
+                f"Error getting data for {type_value}: {str(e)}"
+            )
+            return [{"Item Name": "Error", "Data": f"An error occurred: {str(e)}"}]
 
     def perform_specific_output(self):
         """
@@ -674,7 +1025,7 @@ class Agent:
 
     def decrypt_data(self, data):
         """
-        Decrypt data using KMS.
+        Decrypt data using KMS with method name compatibility.
 
         Args:
             data (bytes): Data to decrypt
@@ -683,17 +1034,110 @@ class Agent:
             str: Decrypted data
         """
         try:
-            if hasattr(self, 'kms_client') and self.kms_client and data:
-                print(f"Attempting to decrypt data of length: {len(data)}")
-                decrypted = self.kms_client.decrypt_data(data)
-                print(f"Data decryption successful: {bool(decrypted)}")
-                return decrypted
-            else:
+            if not hasattr(self, 'kms_client') or not self.kms_client or not data:
                 print("Unable to decrypt: missing KMS client or data")
-            return None
+                return None
+            
+            # Check which method is available in the KMS client and use it
+            if hasattr(self.kms_client, 'decrypt_data'):
+                # Use legacy method
+                decrypted = self.kms_client.decrypt_data(data)
+            elif hasattr(self.kms_client, 'decrypt'):
+                # Use enhanced method
+                decrypted_bytes = self.kms_client.decrypt(data)
+                # Convert bytes to string if the method returns bytes
+                if isinstance(decrypted_bytes, bytes):
+                    decrypted = decrypted_bytes.decode('utf-8')
+                else:
+                    decrypted = decrypted_bytes
+            else:
+                # Neither method is available
+                print("ERROR: KMS client has neither decrypt_data nor decrypt method")
+                return None
+                
+            return decrypted
+            
         except Exception as e:
-            print(f"Error in decrypt_data: {e}")
+            print(f"Error in decrypt_data: {str(e)}")
             return None
+    
+    def verify_encryption_keys(self):
+        """
+        Verify that encryption keys are valid and working properly.
+        
+        This function tests the KMS setup by performing a simple
+        encryption and decryption test.
+        
+        Returns:
+            bool: True if keys are valid and working
+        """
+        try:
+            # Log the verification attempt
+            self._log_security_event(
+                "KEY_VERIFICATION_ATTEMPT", 
+                "Verifying encryption keys"
+            )
+            
+            # Test string to encrypt/decrypt
+            test_string = f"GUARD-TEST-{int(time.time())}"
+            test_bytes = test_string.encode('utf-8')
+            
+            # Verify KMS client is initialized
+            if not hasattr(self, 'kms_client') or not self.kms_client:
+                self._log_security_event(
+                    "KEY_VERIFICATION_ERROR", 
+                    "KMS client not initialized"
+                )
+                return False
+                
+            # Test encryption
+            try:
+                encrypted_data = self.kms_client.encrypt(test_bytes)
+                if not encrypted_data:
+                    self._log_security_event(
+                        "KEY_VERIFICATION_ERROR", 
+                        "Encryption failed - null result"
+                    )
+                    return False
+                    
+                # Test decryption
+                decrypted_data = self.kms_client.decrypt(encrypted_data)
+                if not decrypted_data:
+                    self._log_security_event(
+                        "KEY_VERIFICATION_ERROR", 
+                        "Decryption failed - null result"
+                    )
+                    return False
+                    
+                # Verify the decrypted result matches original
+                decrypted_string = decrypted_data.decode('utf-8')
+                if decrypted_string != test_string:
+                    self._log_security_event(
+                        "KEY_VERIFICATION_ERROR", 
+                        f"Decryption result mismatch: expected '{test_string}', got '{decrypted_string}'"
+                    )
+                    return False
+                    
+                # All tests passed
+                self._log_security_event(
+                    "KEY_VERIFICATION_SUCCESS", 
+                    "Encryption keys verified successfully"
+                )
+                return True
+                
+            except Exception as e:
+                self._log_security_event(
+                    "KEY_VERIFICATION_ERROR", 
+                    f"Encryption/decryption test failed: {str(e)}"
+                )
+                return False
+                
+        except Exception as e:
+            self._log_security_event(
+                "KEY_VERIFICATION_ERROR", 
+                f"Key verification process failed: {str(e)}"
+            )
+            return False
 
     def end_work(self):
         """Clean up resources when the agent is terminated."""

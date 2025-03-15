@@ -13,6 +13,7 @@ import uvicorn
 import boto3
 import time
 import uuid
+import pandas as pd
 import os
 from datetime import datetime
 
@@ -43,6 +44,7 @@ class PIIDataItem(BaseModel):
     """Model for PII data items."""
     Item_Name: str
     Data: str
+# Update these model definitions in your main.py file
 
 class PIIItemBase(BaseModel):
     """Base model for PII data records."""
@@ -64,9 +66,11 @@ class PIIItemDelete(BaseModel):
     Category: Optional[str] = None
     Type: Optional[str] = None
 
-class PIIItemResponse(PIIItemBase):
+class PIIItemResponse(BaseModel):
     """Model for PII data responses."""
     _id: str
+    Category: str
+    Type: str  
     PII: str
     
     class Config:
@@ -79,6 +83,8 @@ class PIIItemResponse(PIIItemBase):
                 "PII": "[{'Item Name': 'Card Number', 'Data': '**** **** **** 1234'}]"
             }
         }
+        # Allow for extra fields that might be in the database but not in the model
+        extra = "ignore"
 
 class TokenResponse(BaseModel):
     """Model for token response."""
@@ -131,6 +137,71 @@ async def count_api_calls(request: Request, call_next):
     
     return response
 
+# Add this to your API/main.py file to provide a direct AWS SSO authentication endpoint
+
+@app.post("/auth/aws-sso", response_model=TokenResponse, tags=["Authentication"])
+async def auth_with_aws_sso(
+    request: Request,
+    access_key: str = Header(..., alias="X-AWS-Access-Key-ID"),
+    secret_key: str = Header(..., alias="X-AWS-Secret-Access-Key"),
+    session_token: Optional[str] = Header(None, alias="X-AWS-Session-Token")
+):
+    """
+    Authenticate with AWS SSO credentials directly.
+    
+    This endpoint allows clients to authenticate using their AWS SSO credentials
+    without relying on the server's ability to correctly handle AWS SSO tokens
+    through the regular authentication flow.
+    """
+    try:
+        # Validate the AWS credentials
+        sts = boto3.client(
+            'sts',
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            aws_session_token=session_token
+        )
+        
+        # Verify the credentials
+        identity = sts.get_caller_identity()
+        user_id = identity.get("UserId", "aws-user")
+        
+        # Create a JWT token for the user
+        # Import JWT utilities
+        from API.jwt_utils import create_user_token
+        
+        # Add user data to the token
+        user_data = {
+            "arn": identity.get("Arn", ""),
+            "account": identity.get("Account", ""),
+            "auth_type": "aws_sso"
+        }
+        
+        # Create token with 1 hour expiration
+        token = create_user_token(user_id, user_data, 60)
+        
+        logger.info(f"AWS SSO authentication successful for user: {user_id}")
+        
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "expires_in": 3600,  # 1 hour in seconds
+            "user_id": user_id
+        }
+    except ClientError as e:
+        logger.error(f"AWS SSO authentication error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"AWS SSO authentication failed: {str(e)}",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error during AWS SSO authentication: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Authentication error: {str(e)}",
+        )
+        
 # Authentication endpoints
 @app.post("/auth/token", response_model=TokenResponse, tags=["Authentication"])
 async def create_token(username: str = Header(...), password: str = Header(...)):
@@ -172,7 +243,6 @@ async def get_user_info(current_user = Depends(get_current_user)):
         "authenticated": True
     }
 
-# Helper function for processing PII data
 def process_data(item, operation, current_user: Dict[str, Any]):
     """
     Process data operations for PII data with security logging.
@@ -205,7 +275,34 @@ def process_data(item, operation, current_user: Dict[str, Any]):
         elif operation == 'delete':
             response = agent.delete_one_data(item)
         elif operation == 'get':
-            return agent.get_all_data()
+            # Get the data from agent
+            data = agent.get_all_data()
+            
+            # Ensure the data is in the correct format for model validation
+            if isinstance(data, pd.DataFrame):
+                # Convert DataFrame to list of dictionaries
+                data_records = data.to_dict(orient='records')
+                return data_records
+            elif isinstance(data, list) and len(data) > 0:
+                if not isinstance(data[0], dict):
+                    # If we have a list of non-dictionary items, convert to proper format
+                    columns = data
+                    data_records = []
+                    for i in range(0, len(columns), 4):  # Assuming 4 columns: _id, Type, PII, Category
+                        if i + 3 < len(columns):
+                            data_records.append({
+                                "_id": str(data[i]),
+                                "Type": str(data[i + 1]),
+                                "PII": str(data[i + 2]),
+                                "Category": str(data[i + 3])
+                            })
+                    return data_records
+                else:
+                    # Already a list of dictionaries
+                    return data
+            else:
+                # If it's something else, return as is and let FastAPI handle validation
+                return data
         else:
             raise ValueError("Invalid operation")
 
@@ -264,10 +361,40 @@ async def delete_pii_item(
     """Delete a PII data item."""
     return process_data(item.dict(), 'delete', current_user)
 
-@app.get("/pii", response_model=List[PIIItemResponse], tags=["PII Data"])
+@app.get("/pii", tags=["PII Data"])
 async def get_pii_data(current_user: Dict[str, Any] = Depends(get_current_user)):
     """Get all PII data."""
-    return process_data(None, 'get', current_user)
+    try:
+        data = process_data(None, 'get', current_user)
+        
+        # Ensure data is properly formatted for response model
+        if isinstance(data, pd.DataFrame):
+            # Convert DataFrame to list of dictionaries
+            return data.to_dict(orient='records')
+        elif isinstance(data, list):
+            # If we already have a list, ensure each item is a proper dict
+            if len(data) > 0 and not isinstance(data[0], dict):
+                logger.warning("PII data is not in expected format, attempting to convert")
+                # Try to interpret as column names
+                response_list = []
+                for i in range(0, len(data), 4):  # Assuming 4 columns: _id, Type, PII, Category
+                    if i + 3 < len(data):
+                        response_list.append({
+                            "_id": str(data[i]),
+                            "Type": str(data[i + 1]),
+                            "PII": str(data[i + 2]),
+                            "Category": str(data[i + 3])
+                        })
+                return response_list
+        
+        # Return data as is
+        return data
+    except Exception as e:
+        logger.error(f"Error retrieving PII data: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail=f"Error retrieving PII data: {str(e)}"
+        )
 
 # Health check endpoint - no auth required
 @app.get("/health", tags=["System"])

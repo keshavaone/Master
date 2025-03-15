@@ -571,55 +571,38 @@ class SessionManager(QObject):
                     text=True
                 )
                 session_info = json.loads(process.stdout)
-            except:
-                # If get-session-token fails, the user might have permanent credentials
-                # We'll create a session with 8 hours expiration
-                self.is_authenticated = True
-                self.auth_type = "aws_sso"
-                self.auth_timestamp = datetime.datetime.now()
-                self.session_token = f"sso-{int(time.time())}-{os.urandom(4).hex()}"
-                self.expiration_time = datetime.datetime.now() + datetime.timedelta(hours=8)
+            except subprocess.CalledProcessError:
+                # Get credentials from AWS credentials file instead
+                self.logger.info("Unable to get session token, retrieving credentials from AWS config")
+                aws_credentials = self._get_aws_credentials_from_file()
                 
-                # Attempt to get credentials from AWS CLI config
-                try:
-                    # Try to get credentials from AWS CLI configuration
-                    aws_config_file = os.path.expanduser("~/.aws/credentials")
-                    if os.path.exists(aws_config_file):
-                        self.logger.info("Reading AWS credentials from ~/.aws/credentials")
-                        # Parse the credentials file
-                        import configparser
-                        config = configparser.ConfigParser()
-                        config.read(aws_config_file)
-                        
-                        # Try default profile first, then any available profile
-                        profile = os.environ.get('AWS_PROFILE', 'default')
-                        if profile not in config.sections() and config.sections():
-                            profile = config.sections()[0]
-                            
-                        if profile in config.sections():
-                            # Set environment variables from the credentials file
-                            os.environ['AWS_ACCESS_KEY_ID'] = config[profile].get('aws_access_key_id', '')
-                            os.environ['AWS_SECRET_ACCESS_KEY'] = config[profile].get('aws_secret_access_key', '')
-                            if 'aws_session_token' in config[profile]:
-                                os.environ['AWS_SESSION_TOKEN'] = config[profile].get('aws_session_token', '')
-                            self.logger.info(f"Set AWS credentials from profile: {profile}")
-                            
-                            # Create dummy credentials for storage
-                            self.credentials = {
-                                'AccessKeyId': os.environ.get('AWS_ACCESS_KEY_ID', ''),
-                                'SecretAccessKey': os.environ.get('AWS_SECRET_ACCESS_KEY', ''),
-                                'SessionToken': os.environ.get('AWS_SESSION_TOKEN', '')
-                            }
-                except Exception as e:
-                    self.logger.error(f"Error reading AWS credentials file: {e}")
+                if aws_credentials:
+                    self.is_authenticated = True
+                    self.auth_type = "aws_sso"
+                    self.auth_timestamp = datetime.datetime.now()
+                    self.session_token = aws_credentials.get('SessionToken', '')
+                    
+                    # Set expiration to 8 hours from now if not available
+                    self.expiration_time = datetime.datetime.now() + datetime.timedelta(hours=8)
+                    
+                    # Store the credentials
+                    self.credentials = aws_credentials
+                    
+                    # Set environment variables
+                    os.environ['AWS_ACCESS_KEY_ID'] = aws_credentials.get('AccessKeyId', '')
+                    os.environ['AWS_SECRET_ACCESS_KEY'] = aws_credentials.get('SecretAccessKey', '')
+                    if 'SessionToken' in aws_credentials:
+                        os.environ['AWS_SESSION_TOKEN'] = aws_credentials.get('SessionToken', '')
+                    
+                    # Start the session timer
+                    self.start_session_timer()
+                    
+                    # Log successful authentication
+                    self._log_auth_event(True, "Using existing AWS credentials from file")
+                    self.auth_success.emit("aws_sso")
+                    return True
                 
-                # Start the session timer
-                self.start_session_timer()
-                
-                # Log successful authentication
-                self._log_auth_event(True, "Using existing AWS credentials")
-                self.auth_success.emit("aws_sso")
-                return True
+                return False
             
             if session_info:
                 credentials = session_info.get('Credentials', {})
@@ -674,6 +657,59 @@ class SessionManager(QObject):
         except Exception as e:
             self.logger.error(f"Error checking existing credentials: {str(e)}")
             return False
+
+    def _get_aws_credentials_from_file(self) -> Optional[Dict[str, str]]:
+        """
+        Get AWS credentials from the credentials file.
+        
+        Returns:
+            Optional[Dict[str, str]]: AWS credentials or None if not found
+        """
+        try:
+            import configparser
+            
+            # Get profile
+            profile = os.environ.get('AWS_PROFILE', 'default')
+            if self.aws_profile:
+                profile = self.aws_profile
+            
+            # Read credentials file
+            credentials_file = os.path.expanduser("~/.aws/credentials")
+            if not os.path.exists(credentials_file):
+                self.logger.warning(f"AWS credentials file not found: {credentials_file}")
+                return None
+                
+            config = configparser.ConfigParser()
+            config.read(credentials_file)
+            
+            # Check if profile exists
+            if profile not in config.sections():
+                if not config.sections():
+                    self.logger.warning(f"No profiles found in AWS credentials file")
+                    return None
+                    
+                # Use first available profile
+                profile = config.sections()[0]
+                self.logger.info(f"Using AWS profile: {profile}")
+            
+            # Get credentials
+            if profile in config.sections():
+                credentials = {
+                    'AccessKeyId': config[profile].get('aws_access_key_id', ''),
+                    'SecretAccessKey': config[profile].get('aws_secret_access_key', '')
+                }
+                
+                # Get session token if available
+                if 'aws_session_token' in config[profile]:
+                    credentials['SessionToken'] = config[profile].get('aws_session_token')
+                    
+                return credentials
+            
+            return None
+        except Exception as e:
+            self.logger.error(f"Error reading AWS credentials file: {str(e)}")
+            return None
+
 
     def is_session_valid(self) -> bool:
         """
