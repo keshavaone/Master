@@ -15,7 +15,6 @@ import time
 import ast
 import json
 import logging
-import hashlib
 import subprocess
 from logging.handlers import RotatingFileHandler
 

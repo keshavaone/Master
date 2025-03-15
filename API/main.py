@@ -5,7 +5,7 @@ from collections import Counter
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field, ValidationError
 import API.CONSTANTS as CONSTANTS
-from API.backend import Agent
+from API.Backend import Agent
 from API.auth_endpoints import router as auth_router
 from API.auth_middleware import enhanced_auth_required as auth_required, get_current_user
 from fastapi import FastAPI, HTTPException, status, Request, Depends, Header

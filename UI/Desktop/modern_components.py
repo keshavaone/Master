@@ -4,17 +4,13 @@ These components provide a more modern, user-friendly interface
 while maintaining the robust security architecture.
 """
 
-import os
-import sys
-import time
-from datetime import datetime, timedelta
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
-    QFrame, QProgressBar, QStyle, QStyleOption, QSizePolicy,
-    QGridLayout, QToolButton, QStackedWidget, QDialog, QComboBox
+    QFrame, QProgressBar, QStyle, QStyleOption,
+     QToolButton, QDialog, QComboBox
 )
-from PyQt5.QtGui import QPainter, QColor, QFont, QIcon, QPixmap, QPalette, QLinearGradient, QGradient
-from PyQt5.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QRect, QEasingCurve, pyqtProperty, QPoint
+from PyQt5.QtGui import QPainter, QColor, QIcon, QPixmap, QPalette, QLinearGradient
+from PyQt5.QtCore import Qt, QSize, QTimer
 
 class ModernColors:
     """Modern color scheme for the application."""
