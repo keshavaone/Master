@@ -93,6 +93,20 @@ class SessionManager(QObject):
         
         self.logger.info(f"Session initialized from IP: {self.auth_ip}")
 
+    def _get_now_datetime(self):
+        """
+        Get a datetime object for the current time that's compatible with self.expiration_time.
+        
+        Returns:
+            datetime.datetime: A datetime object representing the current time
+        """
+        if self.expiration_time and self.expiration_time.tzinfo:
+            # If expiration_time is timezone-aware, create a timezone-aware "now"
+            return datetime.datetime.now(datetime.timezone.utc).astimezone(self.expiration_time.tzinfo)
+        else:
+            # If expiration_time is naive, create a naive "now"
+            return datetime.datetime.now()
+
     def start_session_timer(self):
         """Start the session timer for token refresh and expiration checking."""
         if self.refresh_timer is None:
@@ -191,7 +205,7 @@ class SessionManager(QObject):
         Returns:
             Optional[Dict[str, str]]: SSO configuration or None if not found
         """
-        config_file = os.path.expanduser("~/.guard/sso_config.json")
+        config_file = os.path.expanduser("~/.guard_session/sso_config.json")
         if os.path.exists(config_file):
             try:
                 with open(config_file, 'r') as f:
@@ -209,7 +223,7 @@ class SessionManager(QObject):
         Args:
             config (Dict[str, str]): SSO configuration
         """
-        config_dir = os.path.expanduser("~/.guard")
+        config_dir = os.path.expanduser("~/.guard_session")
         os.makedirs(config_dir, exist_ok=True)
 
         config_file = os.path.join(config_dir, "sso_config.json")
@@ -463,7 +477,7 @@ class SessionManager(QObject):
                 "AWS SSO Configuration",
                 "Enter SSO start URL:",
                 QLineEdit.Normal,
-                "https://d-example.awsapps.com/start"
+                "https://d-9067c603c9.awsapps.com/start/"
             )
             if not ok or not sso_url:
                 return None
@@ -485,7 +499,7 @@ class SessionManager(QObject):
                 "AWS SSO Configuration",
                 "Enter AWS account ID:",
                 QLineEdit.Normal,
-                ""
+                "817215275254"
             )
             if not ok or not account_id:
                 return None
@@ -507,7 +521,7 @@ class SessionManager(QObject):
                 "AWS SSO Configuration",
                 "Enter AWS profile name:",
                 QLineEdit.Normal,
-                "guard-sso-profile"
+                "guard_session"
             )
             if not ok or not profile_name:
                 return None
@@ -566,6 +580,39 @@ class SessionManager(QObject):
                 self.session_token = f"sso-{int(time.time())}-{os.urandom(4).hex()}"
                 self.expiration_time = datetime.datetime.now() + datetime.timedelta(hours=8)
                 
+                # Attempt to get credentials from AWS CLI config
+                try:
+                    # Try to get credentials from AWS CLI configuration
+                    aws_config_file = os.path.expanduser("~/.aws/credentials")
+                    if os.path.exists(aws_config_file):
+                        self.logger.info("Reading AWS credentials from ~/.aws/credentials")
+                        # Parse the credentials file
+                        import configparser
+                        config = configparser.ConfigParser()
+                        config.read(aws_config_file)
+                        
+                        # Try default profile first, then any available profile
+                        profile = os.environ.get('AWS_PROFILE', 'default')
+                        if profile not in config.sections() and config.sections():
+                            profile = config.sections()[0]
+                            
+                        if profile in config.sections():
+                            # Set environment variables from the credentials file
+                            os.environ['AWS_ACCESS_KEY_ID'] = config[profile].get('aws_access_key_id', '')
+                            os.environ['AWS_SECRET_ACCESS_KEY'] = config[profile].get('aws_secret_access_key', '')
+                            if 'aws_session_token' in config[profile]:
+                                os.environ['AWS_SESSION_TOKEN'] = config[profile].get('aws_session_token', '')
+                            self.logger.info(f"Set AWS credentials from profile: {profile}")
+                            
+                            # Create dummy credentials for storage
+                            self.credentials = {
+                                'AccessKeyId': os.environ.get('AWS_ACCESS_KEY_ID', ''),
+                                'SecretAccessKey': os.environ.get('AWS_SECRET_ACCESS_KEY', ''),
+                                'SessionToken': os.environ.get('AWS_SESSION_TOKEN', '')
+                            }
+                except Exception as e:
+                    self.logger.error(f"Error reading AWS credentials file: {e}")
+                
                 # Start the session timer
                 self.start_session_timer()
                 
@@ -604,10 +651,12 @@ class SessionManager(QObject):
                     'Expiration': expiry_str
                 }
                 
-                # Set environment variables for AWS services to use
+                # IMPORTANT: Explicitly set environment variables for AWS services to use
+                # This ensures they're available for all parts of the application
                 os.environ['AWS_ACCESS_KEY_ID'] = credentials.get('AccessKeyId', '')
                 os.environ['AWS_SECRET_ACCESS_KEY'] = credentials.get('SecretAccessKey', '')
                 os.environ['AWS_SESSION_TOKEN'] = credentials.get('SessionToken', '')
+                self.logger.info("Set AWS credentials in environment variables")
                 
                 # Start the session timer
                 self.start_session_timer()
@@ -636,7 +685,7 @@ class SessionManager(QObject):
         if not self.is_authenticated or not self.expiration_time:
             return False
 
-        now = datetime.datetime.now()
+        now = self._get_now_datetime()
         is_valid = now < self.expiration_time
 
         if not is_valid:
@@ -654,7 +703,7 @@ class SessionManager(QObject):
         if not self.is_authenticated or not self.expiration_time:
             return False
 
-        now = datetime.datetime.now()
+        now = self._get_now_datetime()
         time_to_expiry = (self.expiration_time - now).total_seconds()
         needs_refresh = time_to_expiry < self.refresh_threshold
 
@@ -738,8 +787,7 @@ class SessionManager(QObject):
 
         else:  # "password" auth type
             # For password auth, just extend the expiration time
-            self.expiration_time = datetime.datetime.now(
-            ) + datetime.timedelta(seconds=self.token_ttl)
+            self.expiration_time = datetime.datetime.now() + datetime.timedelta(seconds=self.token_ttl)
             self.logger.info(
                 f"Password token refreshed, new expiration: {self.expiration_time}")
             return True
@@ -783,7 +831,7 @@ class SessionManager(QObject):
         if not self.is_authenticated or not self.expiration_time:
             return None
 
-        now = datetime.datetime.now()
+        now = self._get_now_datetime()
         remaining = (self.expiration_time - now).total_seconds()
         return max(0, int(remaining))
 
@@ -853,7 +901,7 @@ class SessionManager(QObject):
         
         # Write to audit log file
         try:
-            log_dir = os.path.expanduser("~/.guard/logs")
+            log_dir = os.path.expanduser("~/.guard_session/logs")
             os.makedirs(log_dir, exist_ok=True)
             
             log_file = os.path.join(log_dir, "auth_audit.log")

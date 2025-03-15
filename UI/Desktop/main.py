@@ -54,7 +54,6 @@ class PIIWindow(QMainWindow):
     including authentication, data display, and CRUD operations.
     """
 
-    # Update the __init__ method to initialize session manager and status bar:
     def __init__(self):
         """Initialize the main window and UI components."""
         super().__init__()
@@ -84,6 +83,15 @@ class PIIWindow(QMainWindow):
         self.time_update_start_time = None
         self.timer = None
         self.start_time = None
+        
+        # Initialize logger
+        self.logger = logging.getLogger('PIIWindow')
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
+        self.logger.setLevel(logging.INFO)
         
         # Initialize session manager and status bar
         self.setup_session_manager()
@@ -582,16 +590,115 @@ class PIIWindow(QMainWindow):
             )
 
     def show_password_input(self):
-        """Show password input for authentication."""
+        """Show password input and login options for authentication."""
         self.btn_connect_server.setText('Authenticating...')
         self.btn_connect_server.setDisabled(True)
         self.btn_connect_server.setStyleSheet(
             "background-color: gray; color: white;"
         )
-        self.password_input.setHidden(False)  # Make the password input visible
+        self.password_input.setHidden(False)  # Make password input visible
+        
+        # Create login options layout
+        login_options_layout = QHBoxLayout()
+        
+        # SSO Login button
+        self.btn_sso_login = QPushButton('AWS SSO Login', self)
+        self.btn_sso_login.setCursor(QCursor(Qt.PointingHandCursor))
+        self.btn_sso_login.setStyleSheet(
+            "background-color: #0066CC; color: white;"
+        )
+        self.btn_sso_login.clicked.connect(self.authenticate_with_sso)
+        login_options_layout.addWidget(self.btn_sso_login)
+        
+        # Direct Login button
+        self.btn_direct_login = QPushButton('Direct Login', self)
+        self.btn_direct_login.setCursor(QCursor(Qt.PointingHandCursor))
+        self.btn_direct_login.setStyleSheet(
+            "background-color: #4CAF50; color: white;"
+        )
+        self.btn_direct_login.clicked.connect(self.direct_authenticate)
+        login_options_layout.addWidget(self.btn_direct_login)
+        
+        # Add login options to layout
+        if hasattr(self, 'login_options_container'):
+            # Remove old container if it exists
+            self.login_options_container.setParent(None)
+            self.login_options_container.deleteLater()
+        
+        self.login_options_container = QWidget(self)
+        self.login_options_container.setLayout(login_options_layout)
+        self.centralWidget().layout().addWidget(self.login_options_container)
+        
         self.password_input.setFocus()
         self.btn_connect_server.clicked.disconnect(self.show_password_input)
         self.btn_connect_server.clicked.connect(self.authenticate_and_connect)
+
+    def direct_authenticate(self):
+        """Authenticate directly using password without attempting AWS SSO."""
+        username = os.environ.get('USER', 'admin')  # Default to 'admin' if USER not set
+        password = self.password_input.text()
+        
+        if not password:
+            QMessageBox.warning(
+                self,
+                "Authentication Error",
+                "Please enter a password."
+            )
+            return
+        
+        try:
+            # Import the authentication solution
+            from API.complete_auth_solution import AuthService
+            
+            # Initialize the auth service
+            self.auth_service = AuthService(CONSTANTS.API_BASE_URL)
+            
+            # Display authenticating message
+            if hasattr(self, 'btn_direct_login'):
+                self.btn_direct_login.setText('Authenticating...')
+                self.btn_direct_login.setDisabled(True)
+            
+            # Log the authentication attempt
+            logging.info(f"Attempting direct authentication for user: {username}")
+            
+            # Authenticate with the service
+            success, message = self.auth_service.authenticate(username, password)
+            
+            if not success:
+                QMessageBox.warning(
+                    self,
+                    "Authentication Failed",
+                    f"Error: {message}"
+                )
+                self.password_input.clear()
+                if hasattr(self, 'btn_direct_login'):
+                    self.btn_direct_login.setText('Direct Login')
+                    self.btn_direct_login.setDisabled(False)
+                return
+            
+            # Authentication successful
+            self.password_input.clear()
+            
+            # Create agent with session token
+            self.agent = Agent(
+                s3=CONSTANTS.AWS_S3,
+                file_name=CONSTANTS.AWS_FILE
+            )
+            self.assistant = Assistant(CONSTANTS.AWS_S3)
+            
+            # Complete connection process
+            self.connect_after_authentication()
+            
+        except Exception as e:
+            logging.error(f"Direct authentication error: {e}")
+            QMessageBox.critical(
+                self,
+                "Authentication Error",
+                f"An unexpected error occurred: {str(e)}"
+            )
+            if hasattr(self, 'btn_direct_login'):
+                self.btn_direct_login.setText('Direct Login')
+                self.btn_direct_login.setDisabled(False)
 
     def handle_data_response(self, response):
         """
@@ -1022,57 +1129,238 @@ class PIIWindow(QMainWindow):
                               for item in selected_items))
 
     def authenticate_and_connect(self):
-        """Authenticate user and connect to server."""
+        """Authenticate user and connect to server with the reliable auth solution."""
+        username = os.environ.get('USER', 'admin')  # Default to 'admin' if USER not set
         password = self.password_input.text()
-        env_password = CONSTANTS.APP_PASSWORD
-        self.btn_connect_server.setText('Logging in...')
-
-        if not env_password:
+        
+        if not password:
             QMessageBox.warning(
                 self,
-                "Security Warning",
-                "Please Activate your Secure Environment before performing operations"
+                "Authentication Error",
+                "Please enter a password."
             )
-            self.btn_connect_server.setText('Connect to Server')
-            self.btn_connect_server.setDisabled(False)
-            self.password_input.setHidden(True)
             return
-
-        hashed_input_password = hashlib.sha256(password.encode()).hexdigest()
-        hashed_env_password = hashlib.sha256(env_password.encode()).hexdigest()
-
-        if hashed_input_password == hashed_env_password:
-            self.btn_connect_server.setStyleSheet(
-                "background-color: orange; color: white;"
-            )
+        
+        self.btn_connect_server.setText('Authenticating...')
+        
+        try:
+            # Import the new authentication solution
+            from API.complete_auth_solution import AuthService
+            
+            # Initialize the auth service
+            self.auth_service = AuthService(CONSTANTS.API_BASE_URL)
+            
+            # Authenticate with the service
+            success, message = self.auth_service.authenticate(username, password)
+            
+            if not success:
+                QMessageBox.warning(
+                    self,
+                    "Authentication Failed",
+                    f"Error: {message}"
+                )
+                self.password_input.clear()
+                self.btn_connect_server.setText('Connect to Server')
+                self.btn_connect_server.setDisabled(False)
+                return
+            
+            # Authentication successful
             self.password_input.clear()
-            self.password_input.setHidden(True)
-            self.connect_to_server()
-            self.update_log(
-                self.assistant.get_current_time(),
-                'Authentication Successful'
+            
+            # Create agent with session token
+            self.agent = Agent(
+                s3=CONSTANTS.AWS_S3,
+                file_name=CONSTANTS.AWS_FILE
             )
-        else:
-            QMessageBox.warning(
+            self.assistant = Assistant(CONSTANTS.AWS_S3)
+            
+            # Complete connection process
+            self.connect_after_authentication()
+            
+        except ImportError:
+            # Fall back to original authentication if the solution module is not available
+            logging.warning("New auth solution not available, falling back to original method")
+            
+            # Initialize auth manager if not already done
+            if not hasattr(self, 'auth_manager'):
+                from UI.Desktop.auth_manager import AuthenticationManager
+                self.auth_manager = AuthenticationManager(self)
+            
+            # Attempt standard authentication
+            if self.auth_manager.authenticate_with_password(username, password):
+                # Authentication successful
+                self.connect_to_server()
+                self.password_input.clear()
+                self.update_log(
+                    QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
+                    f"Authentication successful for user: {self.auth_manager.user_id}"
+                )
+            else:
+                # Authentication failed
+                self.btn_connect_server.setText('Connect to Server')
+                self.btn_connect_server.setDisabled(False)
+                self.password_input.clear()
+        except Exception as e:
+            logging.error(f"Authentication error: {e}")
+            QMessageBox.critical(
                 self,
-                "Authentication Failed",
-                "Incorrect Password!"
+                "Authentication Error",
+                f"An unexpected error occurred: {str(e)}"
             )
-            self.password_input.clear()
             self.btn_connect_server.setText('Connect to Server')
             self.btn_connect_server.setDisabled(False)
-            self.btn_connect_server.clicked.disconnect(
-                self.authenticate_and_connect
+            self.password_input.clear()
+
+    def connect_after_authentication(self):
+        """Complete the connection process after successful authentication."""
+        # Update UI
+        self.btn_connect_server.setText('Connected')
+        self.btn_connect_server.setDisabled(True)
+        self.btn_connect_server.setStyleSheet(
+            "background-color: green; color: white;"
+        )
+        self.btn_display_data.setStyleSheet(
+            "background-color: green; color: white;"
+        )
+        self.btn_display_data.setVisible(True)
+        self.btn_add_entry.setVisible(True)
+        self.log_table.setVisible(True)
+        self.welcome_text.setVisible(True)
+        self.data_table.setVisible(True)
+        self.btn_add_entry.setStyleSheet(
+            "background-color: green; color: white;"
+        )
+        self.btn_display_data.setToolTip('Click to download data')
+        self.btn_connect_server.setToolTip(
+            'You are Connected Successfully. Button Disabled'
+        )
+        
+        # Clear password input
+        self.password_input.setHidden(True)
+        
+        # Show session info button
+        self.btn_session_info.setVisible(True)
+
+        # Create logout button
+        self.create_logout_button()
+
+        # Set up timer for status updates
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.fetch_status)
+        self.timer.start(1000)
+
+        # Get initial data
+        try:
+            success, data = self.auth_service.make_request(
+                method="GET",
+                endpoint="pii"
             )
-            self.btn_connect_server.clicked.connect(self.show_password_input)
+            
+            if success and data is not None:
+                # Convert to DataFrame if needed
+                if not isinstance(data, pd.DataFrame):
+                    data = pd.DataFrame(data)
+                self.populate_data_table(data)
+            else:
+                error_msg = data.get("error", "Unknown error")
+                logging.warning(f"Error fetching initial data: {error_msg}")
+                QMessageBox.warning(
+                    self,
+                    "Data Fetch Warning",
+                    f"Connected successfully but couldn't fetch initial data: {error_msg}"
+                )
+        except Exception as e:
+            logging.error(f"Error fetching initial data: {e}")
+            QMessageBox.warning(
+                self,
+                "Data Fetch Warning",
+                f"Connected successfully but couldn't fetch initial data: {str(e)}"
+            )
+
+        # Log successful connection
+        timestamp = self.assistant.get_current_time() if hasattr(self, 'assistant') else QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
+        self.update_log(timestamp, "Connected to Server.")
+        self.update_log(timestamp, 'Display Data Button: Activated')
+        self.update_log(timestamp, 'Add New Entry Button: Activated')
+        
+        # Switch to PII tab
+        self.tab_widget.setCurrentIndex(0)
+
+    def connect_after_authentication(self):
+        """Complete the connection process after successful authentication."""
+        # Update UI
+        self.btn_connect_server.setText('Connected')
+        self.btn_connect_server.setDisabled(True)
+        self.btn_connect_server.setStyleSheet(
+            "background-color: green; color: white;"
+        )
+        self.btn_display_data.setStyleSheet(
+            "background-color: green; color: white;"
+        )
+        self.btn_display_data.setVisible(True)
+        self.btn_add_entry.setVisible(True)
+        self.log_table.setVisible(True)
+        self.welcome_text.setVisible(True)
+        self.data_table.setVisible(True)
+        self.btn_add_entry.setStyleSheet(
+            "background-color: green; color: white;"
+        )
+        self.btn_display_data.setToolTip('Click to download data')
+        self.btn_connect_server.setToolTip(
+            'You are Connected Successfully. Button Disabled'
+        )
+        
+        # Clear password input
+        self.password_input.clear()
+        self.password_input.setHidden(True)
+        
+        # Show session info button
+        self.btn_session_info.setVisible(True)
+
+        # Create logout button
+        self.create_logout_button()
+
+        # Set up timer for status updates
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.fetch_status)
+        self.timer.start(1000)
+
+        # Get initial data
+        try:
+            success, data = self.auth_service.make_authenticated_request(
+                method="GET",
+                endpoint="pii"
+            )
+            
+            if success and data is not None:
+                # Convert to DataFrame if needed
+                if not isinstance(data, pd.DataFrame):
+                    data = pd.DataFrame(data)
+                self.populate_data_table(data)
+        except Exception as e:
+            self.logger.error(f"Error fetching initial data: {e}")
+            QMessageBox.warning(
+                self,
+                "Data Fetch Warning",
+                f"Connected successfully but couldn't fetch initial data: {str(e)}"
+            )
+
+        # Log successful connection
+        timestamp = self.assistant.get_current_time() if hasattr(self, 'assistant') else QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
+        self.update_log(timestamp, "Connected to Server.")
+        self.update_log(timestamp, 'Display Data Button: Activated')
+        self.update_log(timestamp, 'Add New Entry Button: Activated')
+        
+        # Switch to PII tab
+        self.tab_widget.setCurrentIndex(0)
 
     def connect_to_server(self):
-        """Connect to the backend server with enhanced security."""
+        """Connect to the backend server with enhanced security and fallback authentication."""
         self.btn_connect_server.setDisabled(True)
         try:
             # Ensure we have a session manager
-            if not hasattr(self, 'session_manager') or not self.session_manager.is_authenticated:
-                raise ValueError("No valid session available")
+            if not hasattr(self, 'session_manager'):
+                self.session_manager = SessionManager(self)
             
             # Initialize the authentication service if not already done
             if not hasattr(self, 'auth_service'):
@@ -1080,19 +1368,32 @@ class PIIWindow(QMainWindow):
                     api_base_url=CONSTANTS.API_BASE_URL,
                     session_manager=self.session_manager
                 )
-                
-            # Authenticate based on the active auth type
-            if self.session_manager.auth_type == "aws_sso":
+            
+            # First try AWS SSO authentication if it's available
+            aws_sso_available = False
+            
+            if hasattr(self, 'session_manager') and self.session_manager.is_authenticated:
+                # Use existing SSO session
+                aws_sso_available = True
+                self.logger.info("Using existing AWS SSO session")
                 success, message = self.auth_service.authenticate_with_aws_sso()
-            else:  # password auth
+                
+                if not success:
+                    self.logger.warning(f"AWS SSO authentication failed: {message}")
+                    aws_sso_available = False
+            
+            # If AWS SSO is not available or failed, fall back to password authentication
+            if not aws_sso_available:
+                self.logger.info("Falling back to password authentication")
+                
                 # For password auth, we need to get a token from the API
                 success, message = self.auth_service.authenticate_with_password(
                     username=os.environ.get('USER', 'default_user'),
                     password=self.password_input.text()
                 )
                 
-            if not success:
-                raise ValueError(f"Authentication failed: {message}")
+                if not success:
+                    raise ValueError(f"Password authentication failed: {message}")
             
             # Create agent with session token
             self.agent = Agent(

@@ -8,7 +8,6 @@ supporting both JWT token-based authentication and AWS SSO tokens.
 import os
 import time
 import json
-import jwt
 import logging
 from typing import Optional, Dict, Any, Callable
 from fastapi import Request, HTTPException, status, Depends
@@ -19,6 +18,26 @@ from botocore.exceptions import ClientError
 # Configure logging
 logger = logging.getLogger("api.auth")
 logger.setLevel(logging.INFO)
+
+# Try to import jwt with proper error handling
+try:
+    import jwt
+    # Check if this is PyJWT or another JWT implementation
+    has_pyjwt_error = hasattr(jwt, 'PyJWTError')
+    # Define the exception to catch based on what's available
+    if has_pyjwt_error:
+        # Using PyJWT
+        jwt_decode_error = jwt.PyJWTError
+        logger.info("Using PyJWT library")
+    else:
+        # Using another JWT implementation
+        jwt_decode_error = Exception
+        logger.warning("Using alternative JWT library without PyJWTError")
+except ImportError:
+    # JWT not installed
+    logger.error("JWT library not installed. Authentication will fail.")
+    jwt = None
+    jwt_decode_error = Exception
 
 
 class AuthSettings:
@@ -96,6 +115,10 @@ class AuthDependency(HTTPBearer):
             Dict containing user information from token or None if invalid
         """
         try:
+            if jwt is None:
+                logger.error("JWT library not available")
+                return None
+                
             payload = jwt.decode(
                 token,
                 AuthSettings.JWT_SECRET,
@@ -117,7 +140,7 @@ class AuthDependency(HTTPBearer):
             
             return payload
             
-        except jwt.PyJWTError as e:
+        except jwt_decode_error as e:
             logger.error(f"JWT validation error: {str(e)}")
             return None
         except Exception as e:
@@ -289,6 +312,10 @@ def create_jwt_token(user_id: str, expires_minutes: int = AuthSettings.TOKEN_EXP
     Returns:
         str: Encoded JWT token
     """
+    if jwt is None:
+        logger.error("JWT library not available")
+        return "INVALID_TOKEN_JWT_MISSING"
+        
     expires = time.time() + expires_minutes * 60
     
     payload = {
@@ -298,4 +325,12 @@ def create_jwt_token(user_id: str, expires_minutes: int = AuthSettings.TOKEN_EXP
         "type": "access"
     }
     
-    return jwt.encode(payload, AuthSettings.JWT_SECRET, algorithm=AuthSettings.JWT_ALGORITHM)
+    try:
+        token = jwt.encode(payload, AuthSettings.JWT_SECRET, algorithm=AuthSettings.JWT_ALGORITHM)
+        # Handle bytes vs string return value
+        if isinstance(token, bytes):
+            token = token.decode('utf-8')
+        return token
+    except Exception as e:
+        logger.error(f"Error creating JWT token: {e}")
+        return "INVALID_TOKEN_ERROR"

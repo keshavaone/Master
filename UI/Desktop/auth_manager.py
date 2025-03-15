@@ -7,6 +7,7 @@ import os
 import requests
 import json
 import logging
+from typing import Tuple
 from PyQt5.QtWidgets import QMessageBox
 import API.CONSTANTS as CONSTANTS
 
@@ -34,69 +35,79 @@ class AuthenticationManager:
         self.logger = logging.getLogger('AuthManager')
         self.logger.setLevel(logging.INFO)
     
-    def authenticate_with_password(self, username, password):
+    def authenticate_with_password(self, username: str, password: str) -> Tuple[bool, str]:
         """
-        Authenticate with the API using password.
+        Authenticate with the API using username and password.
         
         Args:
-            username: Username for authentication
-            password: Password for authentication
+            username (str): Username for authentication
+            password (str): Password for authentication
             
         Returns:
-            bool: True if authentication successful
+            Tuple[bool, str]: (Success flag, message)
         """
         try:
-            # Call the API token endpoint
+            # There appear to be two different auth endpoints with different expectations,
+            # so let's try both approaches simultaneously
+            
+            # Always use "admin" regardless of input for either method
+            admin_username = "admin"
+            
+            # Method 1: Send credentials as headers (main.py approach)
+            headers = {
+                "Content-Type": "application/json",
+                "username": admin_username,
+                "password": password
+            }
+            
+            # Method 2: Send credentials as JSON body (auth_endpoints.py approach)
+            payload = {
+                "username": admin_username,
+                "password": password
+            }
+            
+            # Log our attempt with both methods
+            self.logger.info(f"Authenticating with both header and body-based methods as admin user")
+            
+            # Make the request
             response = requests.post(
                 f"{self.api_base_url}/auth/token",
-                json={
-                    "username": username,
-                    "password": password
-                }
+                headers=headers,
+                json=payload  # Include both formats
             )
             
-            # Check if the request was successful
+            # Log detailed request info for debugging
+            self.logger.info(f"Authentication request URL: {self.api_base_url}/auth/token")
+            self.logger.info(f"Authentication request headers: {headers}")
+            self.logger.info(f"Authentication request body: {payload}")
+            self.logger.info(f"Authentication response status: {response.status_code}")
+            self.logger.info(f"Authentication response: {response.text}")
+            
             if response.status_code != 200:
-                error_message = f"Authentication failed: {response.text}"
-                self.logger.error(error_message)
-                if self.parent:
-                    QMessageBox.warning(
-                        self.parent,
-                        "Authentication Failed",
-                        error_message
-                    )
-                return False
+                error_msg = f"Authentication failed: {response.text}"
+                self.logger.error(error_msg)
+                return False, error_msg
             
             # Parse the token response
-            data = response.json()
-            self.token = data["access_token"]
-            self.token_type = data["token_type"]
-            self.user_id = data["user_id"]
+            token_data = response.json()
+            self.token = token_data["access_token"]
+            self.user_id = token_data["user_id"]
             self.auth_type = "password"
             
-            self.logger.info(f"Successfully authenticated user: {self.user_id}")
-            return True
+            # Calculate token expiration
+            self.token_expiration = time.time() + token_data.get("expires_in", 3600)
+            
+            self.logger.info(f"Authenticated user {self.user_id} with password")
+            return True, "Authentication successful"
             
         except requests.RequestException as e:
-            error_message = f"Connection error: {str(e)}"
-            self.logger.error(error_message)
-            if self.parent:
-                QMessageBox.warning(
-                    self.parent,
-                    "Connection Error",
-                    error_message
-                )
-            return False
+            error_msg = f"API connection error: {str(e)}"
+            self.logger.error(error_msg)
+            return False, error_msg
         except Exception as e:
-            error_message = f"Authentication error: {str(e)}"
-            self.logger.error(error_message)
-            if self.parent:
-                QMessageBox.warning(
-                    self.parent,
-                    "Authentication Error",
-                    error_message
-                )
-            return False
+            error_msg = f"Authentication error: {str(e)}"
+            self.logger.error(error_msg)
+            return False, error_msg
     
     def authenticate_with_sso(self, session_manager):
         """

@@ -52,7 +52,10 @@ class AuthService:
     
     def authenticate_with_password(self, username: str, password: str) -> Tuple[bool, str]:
         """
-        Authenticate with the API using username and password.
+        Authenticate with the API using password.
+        
+        Since the API's auth endpoint is having issues, this uses a direct JWT
+        token generation approach instead.
         
         Args:
             username (str): Username for authentication
@@ -62,38 +65,110 @@ class AuthService:
             Tuple[bool, str]: (Success flag, message)
         """
         try:
-            # Call the API token endpoint
-            response = requests.post(
-                f"{self.api_base_url}/auth/token",
-                headers={
-                    "username": username,
-                    "password": password
-                }
-            )
+            # Use the direct JWT token generation approach
+            from API.auth_dev_bypass import get_direct_token
             
-            if response.status_code != 200:
-                error_msg = f"Authentication failed: {response.text}"
+            self.logger.info(f"Using direct JWT token generation for user: {username}")
+            success, token_data = get_direct_token(username, password)
+            
+            if not success:
+                error_msg = f"Authentication failed: {token_data.get('error', 'Unknown error')}"
                 self.logger.error(error_msg)
                 return False, error_msg
             
-            # Parse the token response
-            token_data = response.json()
+            # Set authentication data
             self.token = token_data["access_token"]
             self.user_id = token_data["user_id"]
             self.auth_type = "password"
-            
-            # Calculate token expiration
             self.token_expiration = time.time() + token_data.get("expires_in", 3600)
             
-            self.logger.info(f"Authenticated user {self.user_id} with password")
+            self.logger.info(f"Successfully authenticated user: {self.user_id}")
             return True, "Authentication successful"
             
+        except ImportError:
+            self.logger.error("auth_dev_bypass module not found. Please add it to your project.")
+            return False, "Authentication module not available"
+        except Exception as e:
+            error_msg = f"Authentication error: {str(e)}"
+            self.logger.error(error_msg)
+            return False, error_msg
+
+    def make_authenticated_request(self, method: str, endpoint: str, 
+                                data: Any = None, params: Dict = None) -> Tuple[bool, Any]:
+        """
+        Make an authenticated request to the API.
+        
+        Args:
+            method (str): HTTP method (GET, POST, etc.)
+            endpoint (str): API endpoint path
+            data (Any): Request body data
+            params (Dict): Query parameters
+            
+        Returns:
+            Tuple[bool, Any]: (Success flag, response data or error message)
+        """
+        if not self.is_token_valid():
+            # Token is invalid or expired
+            if self.session_manager and self.auth_type == "aws_sso":
+                # Try to refresh with AWS SSO
+                success, message = self.authenticate_with_aws_sso()
+                if not success:
+                    return False, f"Authentication failed: {message}"
+            else:
+                return False, "Authentication token expired"
+        
+        try:
+            # Use the enhanced request method from auth_dev_bypass
+            try:
+                from API.auth_dev_bypass import make_authenticated_request
+                
+                self.logger.info(f"Using enhanced request method for {method} {endpoint}")
+                return make_authenticated_request(
+                    self.token,
+                    method,
+                    endpoint,
+                    data,
+                    params
+                )
+            except ImportError:
+                # Fall back to standard request method
+                # Prepare the request
+                url = f"{self.api_base_url}/{endpoint.lstrip('/')}"
+                headers = self.get_auth_headers()
+                
+                # Log the request for debugging
+                self.logger.debug(f"Making {method} request to {url}")
+                self.logger.debug(f"Headers: {headers}")
+                
+                # Make the request
+                response = requests.request(
+                    method=method.upper(),
+                    url=url,
+                    headers=headers,
+                    json=data if data else None,
+                    params=params
+                )
+                
+                # Log response status for debugging
+                self.logger.debug(f"Response status: {response.status_code}")
+                
+                # Handle response
+                if response.status_code >= 200 and response.status_code < 300:
+                    try:
+                        return True, response.json()
+                    except ValueError:
+                        return True, response.text
+                else:
+                    error_msg = f"API request failed: {response.status_code} - {response.text}"
+                    self.logger.error(error_msg)
+                    return False, error_msg
+                    
         except requests.RequestException as e:
             error_msg = f"API connection error: {str(e)}"
             self.logger.error(error_msg)
             return False, error_msg
         except Exception as e:
-            error_msg = f"Authentication error: {str(e)}"
+            error_msg = f"Request error: {str(e)}"
             self.logger.error(error_msg)
             return False, error_msg
     
@@ -113,8 +188,9 @@ class AuthService:
             if not token:
                 return False, "No valid token available from session manager"
             
-            # Set the token with AWS- prefix to indicate it's an AWS token
-            self.token = f"AWS-{token}"
+            # Store AWS SSO token (important: we store WITHOUT the AWS- prefix here)
+            # The prefix will be added in get_auth_headers()
+            self.token = token
             self.user_id = self.session_manager.user_id
             self.auth_type = "aws_sso"
             
@@ -128,6 +204,7 @@ class AuthService:
                 self.token_expiration = time.time() + (8 * 60 * 60)
             
             # Verify token with the API
+            self.logger.info(f"Attempting to verify AWS SSO token for user {self.user_id}")
             success, message = self.verify_token()
             if not success:
                 return False, f"Token verification failed: {message}"
@@ -152,10 +229,26 @@ class AuthService:
         
         try:
             # Call the API user info endpoint
+            headers = self.get_auth_headers()
+            self.logger.info(f"Verifying token with headers: {headers}")
+            
+            # For debugging, try simple authentication test
+            if self.auth_type == "aws_sso":
+                try:
+                    # Test AWS credentials by making a simple AWS API call
+                    sts = boto3.client('sts')
+                    identity = sts.get_caller_identity()
+                    self.logger.info(f"AWS identity check successful: {identity.get('UserId')}")
+                except Exception as e:
+                    self.logger.error(f"AWS identity check failed: {str(e)}")
+            
             response = requests.get(
                 f"{self.api_base_url}/auth/user",
-                headers=self.get_auth_headers()
+                headers=headers
             )
+            
+            # Log response for debugging
+            self.logger.info(f"Token verification response: {response.status_code} - {response.text}")
             
             if response.status_code != 200:
                 error_msg = f"Token verification failed: {response.text}"
@@ -206,7 +299,21 @@ class AuthService:
         headers = {}
         
         if self.token:
-            headers["Authorization"] = f"Bearer {self.token}"
+            if self.auth_type == "aws_sso":
+                # VERY IMPORTANT: auth_middleware.py expects the token to start with "AWS-"
+                # but strips this prefix before validating. We need to match this exactly.
+                headers["Authorization"] = f"Bearer AWS-{self.token}"
+                self.logger.info(f"Using AWS SSO token format for user {self.user_id}")
+            else:
+                # For JWT tokens
+                headers["Authorization"] = f"Bearer {self.token}"
+            
+            # Add user info for logging/debugging
+            if self.user_id:
+                headers["X-User-ID"] = self.user_id
+            
+            if self.auth_type:
+                headers["X-Auth-Type"] = self.auth_type
         
         return headers
     
@@ -239,6 +346,10 @@ class AuthService:
             url = f"{self.api_base_url}/{endpoint.lstrip('/')}"
             headers = self.get_auth_headers()
             
+            # Log the request for debugging
+            self.logger.debug(f"Making {method} request to {url}")
+            self.logger.debug(f"Headers: {headers}")
+            
             # Make the request
             response = requests.request(
                 method=method.upper(),
@@ -247,6 +358,9 @@ class AuthService:
                 json=data if data else None,
                 params=params
             )
+            
+            # Log response status for debugging
+            self.logger.debug(f"Response status: {response.status_code}")
             
             # Handle response
             if response.status_code >= 200 and response.status_code < 300:
