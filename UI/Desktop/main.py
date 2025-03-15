@@ -29,10 +29,10 @@ from PyQt5.QtWidgets import (
     QProgressBar, QStatusBar, QStyle
 )
 from UI.Desktop.session_manager import SessionManager
-from API.auth_service import AuthService
+from API.auth_service import EnhancedAuthService as AuthService
 from PyQt5.QtGui import QIcon, QCursor, QGuiApplication
 from PyQt5.QtCore import Qt, QTimer, QDateTime
-from UI.Desktop.modern_components import ModernButton, SessionStatusWidget, ModernDataDialog
+from UI.Desktop.modern_components import ModernButton, SessionStatusWidget, ModernDataDialog, CRUDHelper, DataItemEditDialog
 
 # Local application imports
 from API.Backend import Agent
@@ -319,7 +319,50 @@ class PIIWindow(QMainWindow):
 
         # Connect the close event to the cleanup function
         self.close_event = self.cleanup_on_exit
+    
+    def add_new_entry(self):
+        """Show dialog to add a new entry."""
+        # Create empty item template
+        new_item = {
+            "Category": "",
+            "Type": "",
+            "PII": str([{"Item Name": "", "Data": ""}])
+        }
         
+        # Create and show the edit dialog
+        dialog = DataItemEditDialog(new_item, self)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            # Get the new item data
+            item_data = dialog.get_updated_data()
+            
+            if item_data:
+                # Remove ID field for new items
+                if "_id" in item_data:
+                    del item_data["_id"]
+                
+                # Use CRUDHelper to create the item
+                success, response = CRUDHelper.perform_operation(
+                    'create', 
+                    item_data,
+                    agent=self.agent if hasattr(self, 'agent') else None,
+                    auth_service=self.auth_service if hasattr(self, 'auth_service') else None,
+                    logger=lambda msg: self.update_log(
+                        self.assistant.get_current_time() if hasattr(self, 'assistant') else 
+                        QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
+                        msg
+                    )
+                )
+                
+                if success:
+                    QMessageBox.information(self, "Success", "Item added successfully")
+                    
+                    # Refresh data display if needed
+                    if hasattr(self, 'data_table'):
+                        self.populate_data_table(self.process_request())
+                else:
+                    QMessageBox.warning(self, "Error", f"Failed to add item: {response}")
+                
     def ui_components(self):
         """Initialize and set up the UI components."""
         
@@ -351,13 +394,15 @@ class PIIWindow(QMainWindow):
         pii_layout.addWidget(self.welcome_text, alignment=Qt.AlignCenter)
 
         # Connect server button
-        self.btn_connect_server = self.set_button(
+        self.btn_connect_server = ModernButton(
             'Connect to Server',
-            'Click to connect to server',
-            'Ctrl+Q',
-            self.show_password_input,
-            visible_true=True
+            self,
+            primary=True
         )
+        self.btn_connect_server.setToolTip('Click to connect to server')
+        self.btn_connect_server.setShortcut('Ctrl+Q')
+        self.btn_connect_server.clicked.connect(self.show_password_input)
+        self.btn_connect_server.setVisible(True)
         pii_layout.addWidget(self.btn_connect_server, alignment=Qt.AlignCenter)
 
         # Password input
@@ -1120,6 +1165,29 @@ class PIIWindow(QMainWindow):
         self.table_widget.setAlternatingRowColors(True)
         self.table_widget.setStyleSheet("QTableWidget::item { padding: 5px; }")
 
+    def fetch_latest_data(self):
+        """Fetch the latest data and update the dialog."""
+        try:
+            # Get fresh data 
+            data = self.process_request()
+            
+            # Find any open ModernDataDialog instances and update them
+            for dialog in self.findChildren(ModernDataDialog):
+                dialog.set_data(data)
+                
+            # Log the refresh
+            self.update_log(
+                self.assistant.get_current_time() if hasattr(self, 'assistant') else 
+                QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
+                "Data refreshed successfully"
+            )
+        except Exception as e:
+            self.update_log(
+                self.assistant.get_current_time() if hasattr(self, 'assistant') else 
+                QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
+                f"Error refreshing data: {str(e)}"
+            )
+        
     def show_data_window(self):
         """Show window with data table."""
         if not self.assistant:
@@ -1127,114 +1195,25 @@ class PIIWindow(QMainWindow):
             return
 
         try:
-            # Secure the window by disabling certain features
-            data_window = QMainWindow(self)
-            data_window.setWindowTitle("Your Guard Data")
-            window_flags = (Qt.Window | Qt.CustomizeWindowHint | Qt.WindowTitleHint |
-                            Qt.WindowCloseButtonHint | Qt.WindowMinimizeButtonHint)
-            data_window.setWindowFlags(window_flags)
-
-            central_widget = QWidget(data_window)
-            data_window.setCentralWidget(central_widget)
-            layout = QVBoxLayout(central_widget)
-
-            self.table_widget = QTableWidget()
-            layout.addWidget(self.table_widget)
-
-            # Fetch and process data using authenticated request
-            try:
-                # Check if auth_service is available
-                if hasattr(self, 'auth_service'):
-                    self.update_log(
-                        self.assistant.get_current_time(),
-                        'Fetching data with auth_service.make_authenticated_request'
-                    )
-                    # Use authenticated request method
-                    success, data = self.auth_service.make_authenticated_request(
-                        method="GET",
-                        endpoint="pii"
-                    )
-                    
-                    if not success:
-                        raise ValueError(f"API request failed: {data}")
-                        
-                    # Convert to DataFrame if needed
-                    if isinstance(data, list):
-                        data_frame = pd.DataFrame(data)
-                    else:
-                        data_frame = data
-                # Fallback to auth_manager if available
-                elif hasattr(self, 'auth_manager') and self.auth_manager.is_authenticated():
-                    self.update_log(
-                        self.assistant.get_current_time(),
-                        'Fetching data with auth_manager.make_authenticated_request'
-                    )
-                    # Use authenticated request through auth_manager
-                    success, data = self.auth_manager.make_authenticated_request(
-                        method="GET",
-                        endpoint="pii"
-                    )
-                    
-                    if not success:
-                        raise ValueError(f"API request failed: {data}")
-                        
-                    # Convert to DataFrame if needed
-                    if isinstance(data, list):
-                        data_frame = pd.DataFrame(data)
-                    else:
-                        data_frame = data
-                # Last resort: use Agent directly (if it has the data)
-                elif self.agent:
-                    self.update_log(
-                        self.assistant.get_current_time(),
-                        'Fetching data directly from agent.get_all_data'
-                    )
-                    # Get data directly from agent
-                    data = self.agent.get_all_data()
-                    
-                    # Convert to DataFrame if needed
-                    if isinstance(data, list):
-                        data_frame = pd.DataFrame(data)
-                    else:
-                        data_frame = data
-                else:
-                    # If all else fails, try direct request with logged warning
-                    self.update_log(
-                        self.assistant.get_current_time(),
-                        'WARNING: No authentication service available, making direct request'
-                    )
-                    # Make direct request (likely to fail with 403)
-                    response = requests.get(CONSTANTS.URL)
-                    data_frame = self.handle_data_response(response)
-                    
-            except json.JSONDecodeError as jde:
-                self.update_log(
-                    self.assistant.get_current_time(),
-                    f'JSON Error: {str(jde)}'
-                )
-                QMessageBox.warning(
-                    self,
-                    "Data Error",
-                    "Received data is not in JSON format."
-                )
+            # Fetch data
+            data = self.process_request()
+            if data is None:
                 return
-            except (subprocess.CalledProcessError, ValueError) as e:
-                self.update_log(
-                    self.assistant.get_current_time(),
-                    f'Error: {str(e)}'
-                )
-                QMessageBox.warning(
-                    self,
-                    "Connection Error",
-                    "Invalid server response or connection issue. Please check the server."
-                )
-                return
-                
+
             # Create and show the modern data dialog
-            data_dialog = ModernDataDialog(self)
+            data_dialog = ModernDataDialog(self, "Your Guard Data", self.fetch_latest_data)
+            
+            # Set the CRUD helper and services
+            data_dialog.set_crud_helper(
+                CRUDHelper,  # The helper class itself
+                auth_service=self.auth_service if hasattr(self, 'auth_service') else None,
+                agent=self.agent if hasattr(self, 'agent') else None
+            )
+            
+            # Set the data
             data_dialog.set_data(data)
             
-            # Connect download button
+            # Connect download button to download function
             data_dialog.download_btn.clicked.connect(self.download_pii)
             
             # Show the dialog
@@ -1242,8 +1221,9 @@ class PIIWindow(QMainWindow):
             
         except Exception as e:
             self.update_log(
-                self.assistant.get_current_time(),
-                f'Unexpected error: {str(e)}'
+                self.assistant.get_current_time() if hasattr(self, 'assistant') else 
+                QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
+                f'Error displaying data: {str(e)}'
             )
             QMessageBox.critical(
                 self,
@@ -1987,7 +1967,7 @@ class PIIWindow(QMainWindow):
             self.timer.start(1000)
 
             # Get initial data using the authenticated service
-            success, data = self.auth_service.make_authenticated_request(
+            success, data = self.auth_service.make_synchronous_request(
                 method="GET",
                 endpoint="pii"
             )
@@ -2934,7 +2914,7 @@ class PIIWindow(QMainWindow):
         # Add API authentication info if available
         api_auth_info = ""
         if hasattr(self, 'auth_service'):
-            user_info = self.auth_service.get_user_info()
+            user_info = self.auth_service.get_session_info()
             if user_info.get("is_authenticated"):
                 api_auth_info = (
                     f"\n\nAPI Authentication:\n"
