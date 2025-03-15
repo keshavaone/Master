@@ -10,7 +10,7 @@ import os
 import json
 import logging
 import asyncio
-import aiohttp
+import requests
 import time
 import traceback
 from typing import Dict, Any, Optional, Tuple, List, Union
@@ -39,26 +39,37 @@ class APIClient:
         self.base_url = base_url or CONSTANTS.API_BASE_URL or "http://localhost:8000"
         self.auth_service = auth_service
         self.last_error = None
-        self.session = None
+        self._loop = None
+        self._loop_owner = False
         
         logger.info(f"API client initialized for {self.base_url}")
-
-    async def _initialize_session(self):
-        """Initialize aiohttp session if needed."""
-        if self.session is None:
-            self.session = aiohttp.ClientSession()
     
-    async def close(self):
-        """Close the API client session."""
-        if self.session is not None:
-            await self.session.close()
-            self.session = None
-
-    async def make_request(self, method: str, endpoint: str, 
-                           data: Any = None, params: Dict[str, Any] = None,
-                           headers: Dict[str, str] = None) -> Tuple[bool, Any]:
+    def _get_event_loop(self):
         """
-        Make an API request with proper authentication.
+        Get an event loop safely, creating a new one if necessary.
+        
+        Returns:
+            asyncio.AbstractEventLoop: The event loop
+        """
+        try:
+            # Try to get the current running loop
+            loop = asyncio.get_running_loop()
+            self._loop_owner = False  # We're using someone else's loop
+            return loop
+        except RuntimeError:
+            # No running event loop, create a new one
+            if self._loop is None or self._loop.is_closed():
+                self._loop = asyncio.new_event_loop()
+                self._loop_owner = True  # We own this loop
+            return self._loop
+
+    def sync_make_request(self, method: str, endpoint: str, 
+                       data: Any = None, params: Dict[str, Any] = None,
+                       headers: Dict[str, str] = None) -> Tuple[bool, Any]:
+        """
+        Synchronous version of make_request.
+        
+        This method safely handles event loops for executing async code.
         
         Args:
             method (str): HTTP method (GET, POST, etc.)
@@ -70,85 +81,88 @@ class APIClient:
         Returns:
             Tuple[bool, Any]: (Success flag, response data or error)
         """
+        # Build URL for requests
+        url = urljoin(self.base_url, endpoint.lstrip('/'))
+        
+        # Get auth headers
+        auth_headers = {}
+        if self.auth_service:
+            if hasattr(self.auth_service, 'get_auth_headers'):
+                auth_headers = self.auth_service.get_auth_headers()
+            else:
+                logger.warning("Auth service does not have get_auth_headers method")
+        
+        # Merge with custom headers
+        request_headers = {**auth_headers, **(headers or {})}
+        
+        # Log request details (exclude sensitive info)
+        safe_headers = {k: v for k, v in request_headers.items() 
+                        if k.lower() not in ('authorization', 'x-aws-secret-access-key')}
+        logger.info(f"Making {method} request to {url}")
+        logger.debug(f"Headers: {safe_headers}")
+        if params:
+            logger.debug(f"Params: {params}")
+        
+        # Handle JSON data
+        if data is not None and isinstance(data, (dict, list)):
+            logger.debug(f"Request JSON data: {type(data)}")
+        elif data is not None:
+            logger.warning(f"Data is not JSON serializable: {type(data)}")
+        
         try:
-            await self._initialize_session()
+            # We'll use the requests library for synchronous requests
+            # This avoids any asyncio event loop issues
+            response = requests.request(
+                method=method.upper(),
+                url=url,
+                json=data if isinstance(data, (dict, list)) else None,
+                data=data if not isinstance(data, (dict, list)) else None,
+                params=params,
+                headers=request_headers,
+                timeout=30  # Add a reasonable timeout
+            )
             
-            # Build URL
-            url = urljoin(self.base_url, endpoint.lstrip('/'))
+            # Log response status
+            logger.info(f"Response status: {response.status_code}")
             
-            # Get auth headers
-            auth_headers = {}
-            if self.auth_service:
-                if hasattr(self.auth_service, 'get_auth_headers'):
-                    auth_headers = self.auth_service.get_auth_headers()
-                else:
-                    logger.warning("Auth service does not have get_auth_headers method")
+            # Process response based on content type
+            content_type = response.headers.get('Content-Type', '')
             
-            # Merge with custom headers
-            request_headers = {**auth_headers, **(headers or {})}
-            
-            # Log request details (exclude sensitive info)
-            safe_headers = {k: v for k, v in request_headers.items() 
-                            if k.lower() not in ('authorization', 'x-aws-secret-access-key')}
-            logger.info(f"Making {method} request to {url}")
-            logger.debug(f"Headers: {safe_headers}")
-            if params:
-                logger.debug(f"Params: {params}")
-            
-            # Handle JSON data
-            json_data = None
-            if data is not None:
-                if isinstance(data, (dict, list)):
-                    json_data = data
-                    logger.debug(f"Request JSON data: {type(json_data)}")
-                else:
-                    logger.warning(f"Data is not JSON serializable: {type(data)}")
-            
-            # Make the request
-            async with self.session.request(method=method.upper(), url=url,
-                                           json=json_data, params=params,
-                                           headers=request_headers) as response:
-                
-                # Log response status
-                logger.info(f"Response status: {response.status}")
-                
-                # Process response based on content type
-                content_type = response.headers.get('Content-Type', '')
-                
-                if 'application/json' in content_type:
+            if 'application/json' in content_type:
+                try:
+                    response_data = response.json()
+                except json.JSONDecodeError:
+                    # If Content-Type is JSON but content isn't valid JSON
+                    response_data = response.text
+                    logger.warning(f"Response claimed to be JSON but wasn't: {response_data[:100]}...")
+            else:
+                response_data = response.text
+                # Try to parse as JSON anyway if it looks like it
+                if response_data.strip().startswith('{') or response_data.strip().startswith('['):
                     try:
-                        response_data = await response.json()
-                    except aiohttp.ContentTypeError:
-                        # If Content-Type is JSON but content isn't valid JSON
-                        response_data = await response.text()
-                        logger.warning(f"Response claimed to be JSON but wasn't: {response_data[:100]}...")
-                else:
-                    response_data = await response.text()
+                        response_data = json.loads(response_data)
+                    except json.JSONDecodeError:
+                        pass  # Keep as text if parsing fails
+            
+            # Return based on status code
+            if 200 <= response.status_code < 300:
+                return True, response_data
+            else:
+                error_msg = f"Request failed: {response.status_code}"
+                if isinstance(response_data, dict):
+                    if 'detail' in response_data:
+                        error_msg += f" - {response_data['detail']}"
+                    elif 'message' in response_data:
+                        error_msg += f" - {response_data['message']}"
+                    elif 'error' in response_data:
+                        error_msg += f" - {response_data['error']}"
                 
-                # Return based on status code
-                if 200 <= response.status < 300:
-                    return True, response_data
-                else:
-                    error_msg = f"Request failed: {response.status}"
-                    if isinstance(response_data, dict):
-                        if 'detail' in response_data:
-                            error_msg += f" - {response_data['detail']}"
-                        elif 'message' in response_data:
-                            error_msg += f" - {response_data['message']}"
-                        elif 'error' in response_data:
-                            error_msg += f" - {response_data['error']}"
-                    
-                    self.last_error = error_msg
-                    logger.error(error_msg)
-                    return False, response_data
-                    
-        except aiohttp.ClientError as e:
+                self.last_error = error_msg
+                logger.error(error_msg)
+                return False, response_data
+                
+        except requests.RequestException as e:
             error_msg = f"API connection error: {str(e)}"
-            self.last_error = error_msg
-            logger.error(error_msg)
-            return False, {"error": error_msg}
-        except asyncio.TimeoutError:
-            error_msg = "API request timed out"
             self.last_error = error_msg
             logger.error(error_msg)
             return False, {"error": error_msg}
@@ -158,8 +172,8 @@ class APIClient:
             logger.error(f"{error_msg}\n{traceback.format_exc()}")
             return False, {"error": error_msg}
     
-    async def make_authenticated_request(self, method: str, endpoint: str, 
-                                      data: Any = None, params: Dict[str, Any] = None) -> Tuple[bool, Any]:
+    def sync_make_authenticated_request(self, method: str, endpoint: str, 
+                                     data: Any = None, params: Dict[str, Any] = None) -> Tuple[bool, Any]:
         """
         Make an authenticated request with automatic token refresh if needed.
         
@@ -184,7 +198,7 @@ class APIClient:
                 return False, {"error": "Not authenticated"}
         
         # Make the initial request
-        success, result = await self.make_request(method, endpoint, data, params)
+        success, result = self.sync_make_request(method, endpoint, data, params)
         
         # If request failed with 401 Unauthorized, try to refresh token and retry
         if not success and isinstance(result, dict) and (
@@ -197,14 +211,18 @@ class APIClient:
             # Check if auth service can refresh token
             if hasattr(self.auth_service, 'refresh_token') and callable(self.auth_service.refresh_token):
                 try:
+                    # Handle both synchronous and asynchronous refresh_token methods
                     if asyncio.iscoroutinefunction(self.auth_service.refresh_token):
-                        refresh_success = await self.auth_service.refresh_token()
+                        # Async method requires event loop
+                        loop = self._get_event_loop()
+                        refresh_success = loop.run_until_complete(self.auth_service.refresh_token())
                     else:
+                        # Synchronous method
                         refresh_success = self.auth_service.refresh_token()
                         
                     if refresh_success:
                         logger.info("Token refreshed, retrying request")
-                        return await self.make_request(method, endpoint, data, params)
+                        return self.sync_make_request(method, endpoint, data, params)
                     else:
                         logger.error("Token refresh failed")
                         return False, {"error": "Authentication expired and refresh failed"}
@@ -213,80 +231,6 @@ class APIClient:
                     return False, {"error": f"Token refresh error: {str(e)}"}
         
         return success, result
-
-    # Synchronous methods for compatibility with existing code
-    
-    def sync_make_request(self, method: str, endpoint: str, 
-                         data: Any = None, params: Dict[str, Any] = None,
-                         headers: Dict[str, str] = None) -> Tuple[bool, Any]:
-        """
-        Synchronous version of make_request.
-        
-        This method runs the async method in a new event loop for easy integration with
-        synchronous code.
-        
-        Args:
-            method (str): HTTP method (GET, POST, etc.)
-            endpoint (str): API endpoint path (without base URL)
-            data (Any, optional): Request body data
-            params (Dict[str, Any], optional): Query parameters
-            headers (Dict[str, str], optional): Additional headers
-            
-        Returns:
-            Tuple[bool, Any]: (Success flag, response data or error)
-        """
-        async def _async_wrapper():
-            return await self.make_request(method, endpoint, data, params, headers)
-        
-        # Create a new event loop to run the async function
-        loop = asyncio.new_event_loop()
-        try:
-            result = loop.run_until_complete(_async_wrapper())
-            
-            # Log result type for debugging
-            success, response_data = result
-            if success:
-                logger.info(f"Response type: {type(response_data)}")
-                if isinstance(response_data, str):
-                    logger.info(f"String response preview: {response_data[:100]}...")
-            
-            return result
-        except Exception as e:
-            logger.error(f"Error in sync_make_request: {str(e)}\n{traceback.format_exc()}")
-            return False, {"error": f"Request execution error: {str(e)}"}
-        finally:
-            loop.close()
-    
-    def sync_make_authenticated_request(self, method: str, endpoint: str, 
-                                     data: Any = None, params: Dict[str, Any] = None) -> Tuple[bool, Any]:
-        """
-        Synchronous version of make_authenticated_request.
-        
-        This method runs the async method in a new event loop for easy integration with
-        synchronous code.
-        
-        Args:
-            method (str): HTTP method (GET, POST, etc.)
-            endpoint (str): API endpoint path (without base URL)
-            data (Any, optional): Request body data
-            params (Dict[str, Any], optional): Query parameters
-            
-        Returns:
-            Tuple[bool, Any]: (Success flag, response data or error)
-        """
-        async def _async_wrapper():
-            return await self.make_authenticated_request(method, endpoint, data, params)
-        
-        # Create a new event loop to run the async function
-        loop = asyncio.new_event_loop()
-        try:
-            result = loop.run_until_complete(_async_wrapper())
-            return result
-        except Exception as e:
-            logger.error(f"Error in sync_make_authenticated_request: {str(e)}\n{traceback.format_exc()}")
-            return False, {"error": f"Request execution error: {str(e)}"}
-        finally:
-            loop.close()
     
     # Convenience methods for PII data operations
     
@@ -315,7 +259,6 @@ class APIClient:
                 
                 # Try to parse as JSON
                 try:
-                    import json
                     parsed = json.loads(data)
                     if isinstance(parsed, list):
                         logger.info(f"Successfully parsed string as JSON list with {len(parsed)} items")
@@ -400,3 +343,72 @@ class APIClient:
             delete_data['Type'] = type_
         
         return self.sync_make_authenticated_request("DELETE", "pii", data=delete_data)
+
+    # Async versions of methods - kept for compatibility if needed
+    
+    async def make_request(self, method: str, endpoint: str, 
+                         data: Any = None, params: Dict[str, Any] = None,
+                         headers: Dict[str, str] = None) -> Tuple[bool, Any]:
+        """
+        Make an async API request with proper authentication.
+        
+        Args:
+            method (str): HTTP method (GET, POST, etc.)
+            endpoint (str): API endpoint path (without base URL)
+            data (Any, optional): Request body data
+            params (Dict[str, Any], optional): Query parameters
+            headers (Dict[str, str], optional): Additional headers
+            
+        Returns:
+            Tuple[bool, Any]: (Success flag, response data or error)
+        """
+        # This is now a wrapper around the sync version using concurrent.futures
+        from concurrent.futures import ThreadPoolExecutor
+        import functools
+        
+        with ThreadPoolExecutor() as executor:
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                executor,
+                functools.partial(
+                    self.sync_make_request,
+                    method=method,
+                    endpoint=endpoint,
+                    data=data,
+                    params=params,
+                    headers=headers
+                )
+            )
+            return result
+    
+    async def make_authenticated_request(self, method: str, endpoint: str, 
+                                       data: Any = None, params: Dict[str, Any] = None) -> Tuple[bool, Any]:
+        """
+        Make an async authenticated request.
+        
+        Args:
+            method (str): HTTP method (GET, POST, etc.)
+            endpoint (str): API endpoint path (without base URL)
+            data (Any, optional): Request body data
+            params (Dict[str, Any], optional): Query parameters
+            
+        Returns:
+            Tuple[bool, Any]: (Success flag, response data or error)
+        """
+        # This is now a wrapper around the sync version using concurrent.futures
+        from concurrent.futures import ThreadPoolExecutor
+        import functools
+        
+        with ThreadPoolExecutor() as executor:
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                executor,
+                functools.partial(
+                    self.sync_make_authenticated_request,
+                    method=method,
+                    endpoint=endpoint,
+                    data=data,
+                    params=params
+                )
+            )
+            return result

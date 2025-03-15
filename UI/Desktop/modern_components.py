@@ -820,26 +820,7 @@ class ModernDataDialog(QDialog):
         # Apply filters which will display the items
         self.apply_filters()
     
-    def apply_filters(self):
-        """Apply the selected filters to the data."""
-        selected_category = self.category_filter.currentText()
-        selected_type = self.type_filter.currentText()
-        
-        # Filter the data
-        self.filtered_items = []
-        for item in self.data_items:
-            category = item.get('Category', 'Uncategorized')
-            item_type = item.get('Type', 'Unknown')
-            
-            # Check if item matches the filters
-            category_matches = (selected_category == "All Categories" or category == selected_category)
-            type_matches = (selected_type == "All Types" or item_type == selected_type)
-            
-            if category_matches and type_matches:
-                self.filtered_items.append(item)
-        
-        # Display filtered items
-        self.display_items()
+    
     
     def display_items(self):
         """Display the filtered items in the UI."""

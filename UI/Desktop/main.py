@@ -1268,7 +1268,7 @@ class PIIWindow(QMainWindow):
         
     def enhanced_show_data_window(self):
         """Show enhanced data dialog with CRUD capabilities and error handling."""
-        if not self.assistant:
+        if not hasattr(self, 'assistant') or not self.assistant:
             QMessageBox.warning(self, "Error", "Not connected to server.")
             return
 
@@ -1280,50 +1280,8 @@ class PIIWindow(QMainWindow):
                 "Opening data display window"
             )
             
-            # Use the original ModernDataDialog instead of the enhanced one if there are issues
-            use_original_dialog = False
-            
-            # Check if the enhanced dialog is available
-            try:
-                from UI.Desktop.enhanced_data_dialog import EnhancedDataDialog
-            except ImportError:
-                self.update_log(
-                    self.assistant.get_current_time() if hasattr(self, 'assistant') else 
-                    QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
-                    "Enhanced data dialog not available, falling back to original implementation"
-                )
-                use_original_dialog = True
-                
-            if use_original_dialog:
-                # Fall back to original implementation
-                # Fetch data
-                data = self.process_request()
-                if data is None:
-                    return
-
-                # Create and show the modern data dialog from modern_components
-                from UI.Desktop.modern_components import ModernDataDialog
-                data_dialog = ModernDataDialog(self, "Your Guard Data", self.fetch_latest_data)
-                
-                # Set the CRUD helper and services
-                data_dialog.set_crud_helper(
-                    CRUDHelper,  # The helper class itself
-                    auth_service=self.auth_service if hasattr(self, 'auth_service') else None,
-                    agent=self.agent if hasattr(self, 'agent') else None
-                )
-                
-                # Set the data
-                data_dialog.set_data(data)
-                
-                # Connect download button to download function
-                data_dialog.download_btn.clicked.connect(self.download_pii)
-                
-                # Show the dialog
-                data_dialog.exec_()
-                return
-            
             # Check if we have an API client, create one if not
-            if not hasattr(self, 'api_client'):
+            if not hasattr(self, 'api_client') or self.api_client is None:
                 from UI.Desktop.api_client import APIClient
                 self.api_client = APIClient(
                     base_url=CONSTANTS.API_BASE_URL,
@@ -1337,40 +1295,116 @@ class PIIWindow(QMainWindow):
                     "Created API client for data operations"
                 )
             
-            # Test the API client connection first to catch any issues early
+            # Fetch data first to check if we can connect
+            self.update_log(
+                self.assistant.get_current_time() if hasattr(self, 'assistant') else 
+                QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
+                "Pre-fetching data to verify connection"
+            )
+            
             try:
-                success, health_check = self.api_client.sync_make_request("GET", "health")
+                # Use QProgressDialog instead for better control
+                progress = QProgressDialog("Connecting to server and fetching data...", "Cancel", 0, 100, self)
+                progress.setWindowTitle("Fetching Data")
+                progress.setWindowModality(Qt.WindowModal)
+                progress.setMinimumDuration(0)  # Show immediately
+                progress.setValue(10)
+                progress.show()
+                QApplication.processEvents()  # Keep UI responsive
+                
+                # Attempt to get data
+                progress.setValue(30)
+                QApplication.processEvents()
+                success, data = self.api_client.sync_get_pii_data()
+                
+                # Ensure progress dialog is closed
+                progress.setValue(100)
+                progress.close()
+                progress = None  # Explicitly release the reference
+                
                 if not success:
-                    error_msg = health_check.get('error', str(health_check)) if isinstance(health_check, dict) else str(health_check)
-                    self.update_log(
-                        self.assistant.get_current_time() if hasattr(self, 'assistant') else 
-                        QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
-                        f"API health check failed: {error_msg}"
-                    )
-                    # Continue anyway, we might still be able to get data
+                    error_msg = data.get('error', str(data)) if isinstance(data, dict) else str(data)
+                    raise ValueError(f"Failed to fetch data: {error_msg}")
+                
             except Exception as e:
                 self.update_log(
                     self.assistant.get_current_time() if hasattr(self, 'assistant') else 
                     QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
-                    f"API client test request failed: {str(e)}"
+                    f"Error fetching data: {str(e)}"
                 )
-                # Continue anyway, might work with direct methods
+                
+                # Try direct agent access as fallback
+                if hasattr(self, 'agent') and self.agent:
+                    self.update_log(
+                        self.assistant.get_current_time() if hasattr(self, 'assistant') else 
+                        QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
+                        "Falling back to direct agent access"
+                    )
+                    data = self.agent.get_all_data()
+                    if not data:
+                        raise ValueError("Could not fetch data from any source")
+                else:
+                    QMessageBox.critical(self, "Connection Error", f"Failed to fetch data: {str(e)}")
+                    return
             
-            # Create and show enhanced data dialog
-            from UI.Desktop.enhanced_data_dialog import EnhancedDataDialog
-            data_dialog = EnhancedDataDialog(
-                self,
-                api_client=self.api_client,
-                auth_service=self.auth_service if hasattr(self, 'auth_service') else None,
-                agent=self.agent if hasattr(self, 'agent') else None
-            )
-            
-            # Connect download button to download function
-            data_dialog.download_btn.clicked.connect(self.download_pii)
-            
-            # Show the dialog
-            data_dialog.exec_()
-            
+            # Create and show the enhanced data dialog
+            try:
+                # Try to import the enhanced dialog
+                from UI.Desktop.enhanced_data_dialog import EnhancedDataDialog
+                
+                data_dialog = EnhancedDataDialog(
+                    self,
+                    api_client=self.api_client,
+                    auth_service=self.auth_service if hasattr(self, 'auth_service') else None,
+                    agent=self.agent if hasattr(self, 'agent') else None
+                )
+                
+                # Connect download button to download function
+                data_dialog.download_btn.clicked.connect(self.download_pii)
+                
+                # Show the dialog
+                data_dialog.exec_()
+                
+            except ImportError:
+                # Fall back to modern_components dialog if enhanced dialog is not available
+                self.update_log(
+                    self.assistant.get_current_time() if hasattr(self, 'assistant') else 
+                    QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
+                    "Enhanced dialog not available, using ModernDataDialog instead"
+                )
+                
+                from UI.Desktop.modern_components import ModernDataDialog, CRUDHelper
+                
+                # Create and show the modern data dialog
+                data_dialog = ModernDataDialog(self, "Your Guard Data", self.fetch_latest_data)
+                
+                # Set the CRUD helper and services
+                data_dialog.set_crud_helper(
+                    CRUDHelper,  # The helper class itself
+                    auth_service=self.auth_service if hasattr(self, 'auth_service') else None,
+                    agent=self.agent if hasattr(self, 'agent') else None
+                )
+                
+                # Set the data (convert to list if needed)
+                if isinstance(data, pd.DataFrame):
+                    data_list = data.to_dict(orient='records')
+                elif not isinstance(data, list):
+                    # Try to convert to list if it's not already one
+                    try:
+                        data_list = list(data)
+                    except:
+                        data_list = [data]
+                else:
+                    data_list = data
+                    
+                data_dialog.set_data(data_list)
+                
+                # Connect download button to download function
+                data_dialog.download_btn.clicked.connect(self.download_pii)
+                
+                # Show the dialog
+                data_dialog.exec_()
+                
         except Exception as e:
             self.update_log(
                 self.assistant.get_current_time() if hasattr(self, 'assistant') else 
@@ -1393,7 +1427,6 @@ class PIIWindow(QMainWindow):
                 f"An unexpected error occurred when trying to display data:\n\n{str(e)}\n\n"
                 f"Please check the application logs for more details."
             )
-
     def open_context_menu(self, position):
         """
         Show context menu for table items.
