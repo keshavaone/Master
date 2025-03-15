@@ -1,8 +1,9 @@
 """
-API client for the GUARD application.
+Enhanced API client for the GUARD application.
 
 This module provides a secure client for communicating with the GUARD API,
-handling authentication, request formatting, and error handling.
+handling authentication, request formatting, and error handling with robust
+response handling for all data types.
 """
 
 import os
@@ -10,12 +11,19 @@ import json
 import logging
 import asyncio
 import aiohttp
+import time
+import traceback
 from typing import Dict, Any, Optional, Tuple, List, Union
 from urllib.parse import urljoin
 import API.CONSTANTS as CONSTANTS
 
 # Configure logging
 logger = logging.getLogger("api_client")
+handler = logging.StreamHandler()
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
 
 class APIClient:
     """Client for communicating with the GUARD API securely."""
@@ -28,20 +36,12 @@ class APIClient:
             base_url (str, optional): Base URL for the API server. Defaults to CONSTANTS.API_BASE_URL.
             auth_service: Authentication service to use for API requests.
         """
-        self.base_url = base_url or CONSTANTS.API_BASE_URL
+        self.base_url = base_url or CONSTANTS.API_BASE_URL or "http://localhost:8000"
         self.auth_service = auth_service
         self.last_error = None
-        self.logger = logging.getLogger("api_client")
         self.session = None
         
-        # Initialize logger
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-        self.logger.setLevel(logging.INFO)
-        
-        self.logger.info(f"API client initialized for {self.base_url}")
+        logger.info(f"API client initialized for {self.base_url}")
 
     async def _initialize_session(self):
         """Initialize aiohttp session if needed."""
@@ -70,39 +70,39 @@ class APIClient:
         Returns:
             Tuple[bool, Any]: (Success flag, response data or error)
         """
-        await self._initialize_session()
-        
-        # Build URL
-        url = urljoin(self.base_url, endpoint.lstrip('/'))
-        
-        # Get auth headers
-        auth_headers = {}
-        if self.auth_service:
-            if hasattr(self.auth_service, 'get_auth_headers'):
-                auth_headers = self.auth_service.get_auth_headers()
-            else:
-                self.logger.warning("Auth service does not have get_auth_headers method")
-        
-        # Merge with custom headers
-        request_headers = {**auth_headers, **(headers or {})}
-        
-        # Log request details (exclude sensitive info)
-        safe_headers = {k: v for k, v in request_headers.items() 
-                         if k.lower() not in ('authorization', 'x-aws-secret-access-key')}
-        self.logger.info(f"Making {method} request to {url}")
-        self.logger.debug(f"Headers: {safe_headers}")
-        if params:
-            self.logger.debug(f"Params: {params}")
-        
         try:
+            await self._initialize_session()
+            
+            # Build URL
+            url = urljoin(self.base_url, endpoint.lstrip('/'))
+            
+            # Get auth headers
+            auth_headers = {}
+            if self.auth_service:
+                if hasattr(self.auth_service, 'get_auth_headers'):
+                    auth_headers = self.auth_service.get_auth_headers()
+                else:
+                    logger.warning("Auth service does not have get_auth_headers method")
+            
+            # Merge with custom headers
+            request_headers = {**auth_headers, **(headers or {})}
+            
+            # Log request details (exclude sensitive info)
+            safe_headers = {k: v for k, v in request_headers.items() 
+                            if k.lower() not in ('authorization', 'x-aws-secret-access-key')}
+            logger.info(f"Making {method} request to {url}")
+            logger.debug(f"Headers: {safe_headers}")
+            if params:
+                logger.debug(f"Params: {params}")
+            
             # Handle JSON data
             json_data = None
             if data is not None:
                 if isinstance(data, (dict, list)):
                     json_data = data
-                    self.logger.debug(f"Request JSON data: {type(json_data)}")
+                    logger.debug(f"Request JSON data: {type(json_data)}")
                 else:
-                    self.logger.warning(f"Data is not JSON serializable: {type(data)}")
+                    logger.warning(f"Data is not JSON serializable: {type(data)}")
             
             # Make the request
             async with self.session.request(method=method.upper(), url=url,
@@ -110,13 +110,18 @@ class APIClient:
                                            headers=request_headers) as response:
                 
                 # Log response status
-                self.logger.info(f"Response status: {response.status}")
+                logger.info(f"Response status: {response.status}")
                 
                 # Process response based on content type
                 content_type = response.headers.get('Content-Type', '')
                 
                 if 'application/json' in content_type:
-                    response_data = await response.json()
+                    try:
+                        response_data = await response.json()
+                    except aiohttp.ContentTypeError:
+                        # If Content-Type is JSON but content isn't valid JSON
+                        response_data = await response.text()
+                        logger.warning(f"Response claimed to be JSON but wasn't: {response_data[:100]}...")
                 else:
                     response_data = await response.text()
                 
@@ -125,29 +130,32 @@ class APIClient:
                     return True, response_data
                 else:
                     error_msg = f"Request failed: {response.status}"
-                    if isinstance(response_data, dict) and 'detail' in response_data:
-                        error_msg += f" - {response_data['detail']}"
-                    elif isinstance(response_data, dict) and 'message' in response_data:
-                        error_msg += f" - {response_data['message']}"
+                    if isinstance(response_data, dict):
+                        if 'detail' in response_data:
+                            error_msg += f" - {response_data['detail']}"
+                        elif 'message' in response_data:
+                            error_msg += f" - {response_data['message']}"
+                        elif 'error' in response_data:
+                            error_msg += f" - {response_data['error']}"
                     
                     self.last_error = error_msg
-                    self.logger.error(error_msg)
+                    logger.error(error_msg)
                     return False, response_data
                     
         except aiohttp.ClientError as e:
             error_msg = f"API connection error: {str(e)}"
             self.last_error = error_msg
-            self.logger.error(error_msg)
+            logger.error(error_msg)
             return False, {"error": error_msg}
         except asyncio.TimeoutError:
             error_msg = "API request timed out"
             self.last_error = error_msg
-            self.logger.error(error_msg)
+            logger.error(error_msg)
             return False, {"error": error_msg}
         except Exception as e:
             error_msg = f"Unexpected error: {str(e)}"
             self.last_error = error_msg
-            self.logger.error(error_msg)
+            logger.error(f"{error_msg}\n{traceback.format_exc()}")
             return False, {"error": error_msg}
     
     async def make_authenticated_request(self, method: str, endpoint: str, 
@@ -166,321 +174,88 @@ class APIClient:
         """
         # Check if we have auth service
         if not self.auth_service:
-            self.logger.error("No authentication service provided")
+            logger.error("No authentication service provided")
             return False, {"error": "Authentication service not available"}
         
         # Check if auth service is authenticated
         if hasattr(self.auth_service, 'is_authenticated') and callable(self.auth_service.is_authenticated):
             if not self.auth_service.is_authenticated():
-                self.logger.error("Not authenticated with auth service")
+                logger.error("Not authenticated with auth service")
                 return False, {"error": "Not authenticated"}
         
         # Make the initial request
         success, result = await self.make_request(method, endpoint, data, params)
         
         # If request failed with 401 Unauthorized, try to refresh token and retry
-        if not success and isinstance(result, dict) and result.get('detail') == 'Invalid token or expired token':
-            self.logger.info("Token expired, attempting to refresh")
+        if not success and isinstance(result, dict) and (
+            result.get('detail') == 'Invalid token or expired token' or 
+            result.get('detail') == 'Not authenticated' or
+            result.get('error') == 'Authentication expired'
+        ):
+            logger.info("Token expired, attempting to refresh")
             
             # Check if auth service can refresh token
             if hasattr(self.auth_service, 'refresh_token') and callable(self.auth_service.refresh_token):
-                refresh_success = await self.auth_service.refresh_token()
-                if refresh_success:
-                    self.logger.info("Token refreshed, retrying request")
-                    return await self.make_request(method, endpoint, data, params)
-                else:
-                    self.logger.error("Token refresh failed")
-                    return False, {"error": "Authentication expired and refresh failed"}
+                try:
+                    if asyncio.iscoroutinefunction(self.auth_service.refresh_token):
+                        refresh_success = await self.auth_service.refresh_token()
+                    else:
+                        refresh_success = self.auth_service.refresh_token()
+                        
+                    if refresh_success:
+                        logger.info("Token refreshed, retrying request")
+                        return await self.make_request(method, endpoint, data, params)
+                    else:
+                        logger.error("Token refresh failed")
+                        return False, {"error": "Authentication expired and refresh failed"}
+                except Exception as e:
+                    logger.error(f"Error during token refresh: {str(e)}")
+                    return False, {"error": f"Token refresh error: {str(e)}"}
         
         return success, result
 
-    # PII Data Endpoints
+    # Synchronous methods for compatibility with existing code
     
-    async def get_pii_data(self) -> Tuple[bool, List[Dict[str, Any]]]:
+    def sync_make_request(self, method: str, endpoint: str, 
+                         data: Any = None, params: Dict[str, Any] = None,
+                         headers: Dict[str, str] = None) -> Tuple[bool, Any]:
         """
-        Get all PII data from the API.
+        Synchronous version of make_request.
         
-        Returns:
-            Tuple[bool, List[Dict]]: (Success flag, PII data or error)
-        """
-        return await self.make_authenticated_request("GET", "pii")
-    
-    async def add_pii_item(self, item_data: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-        """
-        Add a new PII data item.
+        This method runs the async method in a new event loop for easy integration with
+        synchronous code.
         
         Args:
-            item_data (Dict): PII item data with Category, Type, and PII fields
+            method (str): HTTP method (GET, POST, etc.)
+            endpoint (str): API endpoint path (without base URL)
+            data (Any, optional): Request body data
+            params (Dict[str, Any], optional): Query parameters
+            headers (Dict[str, str], optional): Additional headers
             
         Returns:
-            Tuple[bool, Dict]: (Success flag, response data or error)
+            Tuple[bool, Any]: (Success flag, response data or error)
         """
-        # Validate required fields
-        required_fields = ['Category', 'Type', 'PII']
-        missing_fields = [field for field in required_fields if field not in item_data]
+        async def _async_wrapper():
+            return await self.make_request(method, endpoint, data, params, headers)
         
-        if missing_fields:
-            error_msg = f"Missing required fields: {', '.join(missing_fields)}"
-            self.logger.error(error_msg)
-            return False, {"error": error_msg}
-        
-        return await self.make_authenticated_request("POST", "pii", data=item_data)
-    
-    async def update_pii_item(self, item_data: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-        """
-        Update an existing PII data item.
-        
-        Args:
-            item_data (Dict): PII item data with _id, Category, Type, and PII fields
-            
-        Returns:
-            Tuple[bool, Dict]: (Success flag, response data or error)
-        """
-        # Validate required fields
-        required_fields = ['_id', 'Category', 'Type', 'PII']
-        missing_fields = [field for field in required_fields if field not in item_data]
-        
-        if missing_fields:
-            error_msg = f"Missing required fields: {', '.join(missing_fields)}"
-            self.logger.error(error_msg)
-            return False, {"error": error_msg}
-        
-        return await self.make_authenticated_request("PATCH", "pii", data=item_data)
-    
-    async def delete_pii_item(self, item_id: str, category: str = None, type_: str = None) -> Tuple[bool, Dict[str, Any]]:
-        """
-        Delete a PII data item.
-        
-        Args:
-            item_id (str): ID of the item to delete
-            category (str, optional): Category of the item
-            type_ (str, optional): Type of the item
-            
-        Returns:
-            Tuple[bool, Dict]: (Success flag, response data or error)
-        """
-        delete_data = {'_id': item_id}
-        if category:
-            delete_data['Category'] = category
-        if type_:
-            delete_data['Type'] = type_
-        
-        return await self.make_authenticated_request("DELETE", "pii", data=delete_data)
-    
-    async def get_pii_categories(self) -> Tuple[bool, List[str]]:
-        """
-        Get all unique PII data categories.
-        
-        Returns:
-            Tuple[bool, List[str]]: (Success flag, list of categories or error)
-        """
-        success, data = await self.get_pii_data()
-        
-        if not success:
-            return False, data
-        
-        # Extract unique categories
+        # Create a new event loop to run the async function
+        loop = asyncio.new_event_loop()
         try:
-            if isinstance(data, list):
-                categories = sorted(list(set(item.get('Category', '') for item in data if 'Category' in item)))
-                return True, categories
-            else:
-                return False, {"error": "Unexpected data format"}
+            result = loop.run_until_complete(_async_wrapper())
+            
+            # Log result type for debugging
+            success, response_data = result
+            if success:
+                logger.info(f"Response type: {type(response_data)}")
+                if isinstance(response_data, str):
+                    logger.info(f"String response preview: {response_data[:100]}...")
+            
+            return result
         except Exception as e:
-            error_msg = f"Error extracting categories: {str(e)}"
-            self.logger.error(error_msg)
-            return False, {"error": error_msg}
-    
-    async def get_pii_types_by_category(self, category: str) -> Tuple[bool, List[str]]:
-        """
-        Get all PII data types for a specific category.
-        
-        Args:
-            category (str): Category to get types for
-            
-        Returns:
-            Tuple[bool, List[str]]: (Success flag, list of types or error)
-        """
-        success, data = await self.get_pii_data()
-        
-        if not success:
-            return False, data
-        
-        # Filter by category and extract unique types
-        try:
-            if isinstance(data, list):
-                types = sorted(list(set(item.get('Type', '') for item in data 
-                                    if 'Type' in item and item.get('Category') == category)))
-                return True, types
-            else:
-                return False, {"error": "Unexpected data format"}
-        except Exception as e:
-            error_msg = f"Error extracting types: {str(e)}"
-            self.logger.error(error_msg)
-            return False, {"error": error_msg}
-    
-    async def get_pii_item_by_id(self, item_id: str) -> Tuple[bool, Dict[str, Any]]:
-        """
-        Get a specific PII item by ID.
-        
-        Args:
-            item_id (str): ID of the item to retrieve
-            
-        Returns:
-            Tuple[bool, Dict]: (Success flag, item data or error)
-        """
-        # Use the search endpoint with ID filter or fall back to getting all and filtering
-        success, data = await self.get_pii_data()
-        
-        if not success:
-            return False, data
-        
-        # Find the item with matching ID
-        try:
-            if isinstance(data, list):
-                for item in data:
-                    if item.get('_id') == item_id:
-                        return True, item
-                
-                return False, {"error": f"Item with ID {item_id} not found"}
-            else:
-                return False, {"error": "Unexpected data format"}
-        except Exception as e:
-            error_msg = f"Error finding item: {str(e)}"
-            self.logger.error(error_msg)
-            return False, {"error": error_msg}
-    
-    # Authentication Endpoints
-    
-    async def login_with_password(self, username: str, password: str) -> Tuple[bool, Dict[str, Any]]:
-        """
-        Login with username and password.
-        
-        Args:
-            username (str): Username for authentication
-            password (str): Password for authentication
-            
-        Returns:
-            Tuple[bool, Dict]: (Success flag, token data or error)
-        """
-        try:
-            # Call the token endpoint
-            login_data = {"username": username, "password": password}
-            
-            # Try both header and body approaches since the backend supports both
-            headers = {
-                "Content-Type": "application/json",
-                "username": username,
-                "password": password
-            }
-            
-            success, result = await self.make_request("POST", "auth/token", 
-                                                    data=login_data, 
-                                                    headers=headers)
-            
-            return success, result
-        except Exception as e:
-            error_msg = f"Login error: {str(e)}"
-            self.logger.error(error_msg)
-            return False, {"error": error_msg}
-    
-    async def login_with_aws_sso(self, credentials: Dict[str, str]) -> Tuple[bool, Dict[str, Any]]:
-        """
-        Login with AWS SSO credentials.
-        
-        Args:
-            credentials (Dict): AWS credentials with AccessKeyId, SecretAccessKey, SessionToken
-            
-        Returns:
-            Tuple[bool, Dict]: (Success flag, token data or error)
-        """
-        try:
-            # Prepare headers with AWS credentials
-            headers = {
-                "X-AWS-Access-Key-ID": credentials.get('AccessKeyId', ''),
-                "X-AWS-Secret-Access-Key": credentials.get('SecretAccessKey', '')
-            }
-            
-            # Add session token if available
-            if 'SessionToken' in credentials:
-                headers["X-AWS-Session-Token"] = credentials.get('SessionToken')
-            
-            # Call the AWS SSO auth endpoint
-            success, result = await self.make_request("POST", "auth/aws-sso", headers=headers)
-            
-            return success, result
-        except Exception as e:
-            error_msg = f"AWS SSO login error: {str(e)}"
-            self.logger.error(error_msg)
-            return False, {"error": error_msg}
-    
-    async def verify_token(self, token: str) -> Tuple[bool, Dict[str, Any]]:
-        """
-        Verify if a token is valid.
-        
-        Args:
-            token (str): Token to verify
-            
-        Returns:
-            Tuple[bool, Dict]: (Success flag, verification result or error)
-        """
-        try:
-            # Prepare headers with token
-            headers = {"Authorization": f"Bearer {token}"}
-            
-            # Call the verify endpoint
-            success, result = await self.make_request("GET", "auth/user", headers=headers)
-            
-            return success, result
-        except Exception as e:
-            error_msg = f"Token verification error: {str(e)}"
-            self.logger.error(error_msg)
-            return False, {"error": error_msg}
-    
-    async def refresh_token(self, token: str) -> Tuple[bool, Dict[str, Any]]:
-        """
-        Refresh an authentication token.
-        
-        Args:
-            token (str): Current token to refresh
-            
-        Returns:
-            Tuple[bool, Dict]: (Success flag, new token data or error)
-        """
-        try:
-            # Prepare headers with token
-            headers = {"Authorization": f"Bearer {token}"}
-            
-            # Call the refresh endpoint
-            success, result = await self.make_request("POST", "auth/token/refresh", headers=headers)
-            
-            return success, result
-        except Exception as e:
-            error_msg = f"Token refresh error: {str(e)}"
-            self.logger.error(error_msg)
-            return False, {"error": error_msg}
-    
-    # System Endpoints
-    
-    async def get_health_status(self) -> Tuple[bool, Dict[str, Any]]:
-        """
-        Check API health status.
-        
-        Returns:
-            Tuple[bool, Dict]: (Success flag, health status or error)
-        """
-        return await self.make_request("GET", "health")
-    
-    async def get_system_info(self) -> Tuple[bool, Dict[str, Any]]:
-        """
-        Get system information (admin only).
-        
-        Returns:
-            Tuple[bool, Dict]: (Success flag, system info or error)
-        """
-        return await self.make_authenticated_request("GET", "system/info")
-
-    # Synchronous compatibility methods for easier integration with existing code
+            logger.error(f"Error in sync_make_request: {str(e)}\n{traceback.format_exc()}")
+            return False, {"error": f"Request execution error: {str(e)}"}
+        finally:
+            loop.close()
     
     def sync_make_authenticated_request(self, method: str, endpoint: str, 
                                      data: Any = None, params: Dict[str, Any] = None) -> Tuple[bool, Any]:
@@ -488,7 +263,7 @@ class APIClient:
         Synchronous version of make_authenticated_request.
         
         This method runs the async method in a new event loop for easy integration with
-        synchronous code. For production use, prefer the async version.
+        synchronous code.
         
         Args:
             method (str): HTTP method (GET, POST, etc.)
@@ -507,23 +282,117 @@ class APIClient:
         try:
             result = loop.run_until_complete(_async_wrapper())
             return result
+        except Exception as e:
+            logger.error(f"Error in sync_make_authenticated_request: {str(e)}\n{traceback.format_exc()}")
+            return False, {"error": f"Request execution error: {str(e)}"}
         finally:
             loop.close()
     
-    def sync_get_pii_data(self) -> Tuple[bool, List[Dict[str, Any]]]:
-        """Synchronous version of get_pii_data."""
-        return self.sync_make_authenticated_request("GET", "pii")
+    # Convenience methods for PII data operations
+    
+    def sync_get_pii_data(self) -> Tuple[bool, Union[List[Dict[str, Any]], str, Dict[str, Any]]]:
+        """
+        Synchronous method to get all PII data with robust response handling.
+        
+        Returns:
+            Tuple[bool, List[Dict] or str or Dict]: (Success flag, PII data or error message)
+        """
+        response = self.sync_make_authenticated_request("GET", "pii")
+        
+        # Unpack the response
+        success, data = response
+        
+        if success:
+            # Handle different types of successful responses
+            if isinstance(data, list):
+                logger.info(f"Received list data with {len(data)} items")
+                return True, data
+            elif isinstance(data, dict):
+                logger.info("Received dictionary data, wrapping in list")
+                return True, [data]
+            elif isinstance(data, str):
+                logger.warning(f"Received string response: {data[:100]}...")
+                
+                # Try to parse as JSON
+                try:
+                    import json
+                    parsed = json.loads(data)
+                    if isinstance(parsed, list):
+                        logger.info(f"Successfully parsed string as JSON list with {len(parsed)} items")
+                        return True, parsed
+                    elif isinstance(parsed, dict):
+                        logger.info("Successfully parsed string as JSON dict, wrapping in list")
+                        return True, [parsed]
+                    else:
+                        # Return parsed data as is
+                        logger.info(f"Successfully parsed string as JSON {type(parsed)}")
+                        return True, parsed
+                except json.JSONDecodeError:
+                    # Not JSON, return as string
+                    logger.warning("String response is not valid JSON")
+                    return True, data
+            else:
+                # Other types - convert to string
+                logger.warning(f"Unexpected response type: {type(data)}")
+                return True, str(data)
+        else:
+            # For failures, return the original response
+            return response
     
     def sync_add_pii_item(self, item_data: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-        """Synchronous version of add_pii_item."""
+        """
+        Synchronous method to add a new PII data item.
+        
+        Args:
+            item_data (Dict): PII item data with Category, Type, and PII fields
+            
+        Returns:
+            Tuple[bool, Dict]: (Success flag, response data or error)
+        """
+        # Validate required fields
+        required_fields = ['Category', 'Type', 'PII']
+        missing_fields = [field for field in required_fields if field not in item_data]
+        
+        if missing_fields:
+            error_msg = f"Missing required fields: {', '.join(missing_fields)}"
+            logger.error(error_msg)
+            return False, {"error": error_msg}
+        
         return self.sync_make_authenticated_request("POST", "pii", data=item_data)
     
     def sync_update_pii_item(self, item_data: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-        """Synchronous version of update_pii_item."""
+        """
+        Synchronous method to update an existing PII data item.
+        
+        Args:
+            item_data (Dict): PII item data with _id, Category, Type, and PII fields
+            
+        Returns:
+            Tuple[bool, Dict]: (Success flag, response data or error)
+        """
+        # Validate required fields
+        required_fields = ['_id', 'Category', 'Type', 'PII']
+        missing_fields = [field for field in required_fields if field not in item_data]
+        
+        if missing_fields:
+            error_msg = f"Missing required fields: {', '.join(missing_fields)}"
+            logger.error(error_msg)
+            return False, {"error": error_msg}
+        
         return self.sync_make_authenticated_request("PATCH", "pii", data=item_data)
     
     def sync_delete_pii_item(self, item_id: str, category: str = None, type_: str = None) -> Tuple[bool, Dict[str, Any]]:
-        """Synchronous version of delete_pii_item."""
+        """
+        Synchronous method to delete a PII data item.
+        
+        Args:
+            item_id (str): ID of the item to delete
+            category (str, optional): Category of the item
+            type_ (str, optional): Type of the item
+            
+        Returns:
+            Tuple[bool, Dict]: (Success flag, response data or error)
+        """
         delete_data = {'_id': item_id}
         if category:
             delete_data['Category'] = category
@@ -531,41 +400,3 @@ class APIClient:
             delete_data['Type'] = type_
         
         return self.sync_make_authenticated_request("DELETE", "pii", data=delete_data)
-
-
-# Example usage
-if __name__ == "__main__":
-    import asyncio
-    
-    async def test_api():
-        # Create auth service (this would normally be your auth_service instance)
-        from API.auth_service import AuthService
-        auth_service = AuthService(CONSTANTS.API_BASE_URL)
-        
-        # Login with password (for testing)
-        username = os.environ.get('USER', 'admin')
-        password = CONSTANTS.APP_PASSWORD
-        success, _ = auth_service.authenticate_with_password(username, password)
-        
-        if not success:
-            print("Authentication failed")
-            return
-        
-        # Create API client
-        client = APIClient(auth_service=auth_service)
-        
-        # Test health endpoint
-        print("Testing health endpoint...")
-        success, health = await client.get_health_status()
-        print(f"Health: {success}, {health}")
-        
-        # Test get PII data
-        print("Testing get PII data...")
-        success, data = await client.get_pii_data()
-        print(f"Got {len(data) if success and isinstance(data, list) else 0} PII items")
-        
-        # Clean up
-        await client.close()
-    
-    # Run the test
-    asyncio.run(test_api())

@@ -446,7 +446,7 @@ class PIIWindow(QMainWindow):
             'Display Data',
             'Click to display data',
             'Ctrl+D',
-            self.show_data_window,
+            self.enhanced_show_data_window,
             style="background-color: gray; color: black;"
         )
         button_layout.addWidget(self.btn_display_data)
@@ -747,26 +747,64 @@ class PIIWindow(QMainWindow):
                     QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
                     "Using auth_service for API request"
                 )
-                # Make authenticated request
-                success, data = self.auth_service.make_authenticated_request(
-                    method="GET",
-                    endpoint="pii"
-                )
+                
+                # Import the APIClient if not already available
+                from UI.Desktop.api_client import APIClient
+                
+                # Create API client if it doesn't exist
+                if not hasattr(self, 'api_client'):
+                    self.api_client = APIClient(
+                        base_url=CONSTANTS.API_BASE_URL,
+                        auth_service=self.auth_service
+                    )
+                
+                # Use synchronous method to fetch data
+                success, data = self.api_client.sync_get_pii_data()
                 
                 if not success:
+                    # Handle different error response formats
                     if isinstance(data, dict) and 'error' in data:
                         error_msg = data['error']
+                    elif isinstance(data, str):
+                        # Handle string responses from the API
+                        error_msg = data
                     else:
                         error_msg = str(data)
                         
                     QMessageBox.warning(self, "Error", f"Failed to fetch data: {error_msg}")
                     return None
-                    
-                # Convert to DataFrame if needed
+                
+                # Handle different successful response formats
                 if isinstance(data, list):
                     return pd.DataFrame(data)
-                return data
-                
+                elif isinstance(data, str):
+                    # Try to parse string response as JSON
+                    self.update_log(
+                        self.assistant.get_current_time() if hasattr(self, 'assistant') else
+                        QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
+                        "Received string response, attempting to parse as JSON"
+                    )
+                    try:
+                        import json
+                        parsed_data = json.loads(data)
+                        if isinstance(parsed_data, list):
+                            return pd.DataFrame(parsed_data)
+                        else:
+                            return pd.DataFrame([parsed_data])
+                    except json.JSONDecodeError:
+                        # If not valid JSON, display in a single row dataframe
+                        QMessageBox.warning(self, "Data Format Warning", 
+                            "Received unexpected string response from server. Displaying as raw data.")
+                        return pd.DataFrame([{"Raw Response": data}])
+                else:
+                    # For any other type, convert to DataFrame if possible
+                    try:
+                        return pd.DataFrame(data)
+                    except:
+                        QMessageBox.warning(self, "Data Format Error", 
+                            f"Received unexpected data type: {type(data)}. Cannot display.")
+                        return None
+                    
             # Fall back to auth_manager
             elif hasattr(self, 'auth_manager') and self.auth_manager.token:
                 self.update_log(
@@ -782,14 +820,37 @@ class PIIWindow(QMainWindow):
                 )
                 
                 if not success:
-                    QMessageBox.warning(self, "Error", f"Failed to fetch data: {data}")
+                    if isinstance(data, dict) and 'error' in data:
+                        error_msg = data['error']
+                    elif isinstance(data, str):
+                        error_msg = data
+                    else:
+                        error_msg = str(data)
+                    QMessageBox.warning(self, "Error", f"Failed to fetch data: {error_msg}")
                     return None
                     
-                # Convert to DataFrame if needed
+                # Handle different response formats
                 if isinstance(data, list):
                     return pd.DataFrame(data)
-                return data
-                
+                elif isinstance(data, str):
+                    # Try to parse as JSON
+                    try:
+                        import json
+                        parsed_data = json.loads(data)
+                        if isinstance(parsed_data, list):
+                            return pd.DataFrame(parsed_data)
+                        else:
+                            return pd.DataFrame([parsed_data])
+                    except:
+                        return pd.DataFrame([{"Raw Response": data}])
+                else:
+                    try:
+                        return pd.DataFrame(data)
+                    except:
+                        QMessageBox.warning(self, "Data Format Error", 
+                            f"Received unexpected data type: {type(data)}. Cannot display.")
+                        return None
+                    
             # Last resort: try to get data directly from agent
             elif hasattr(self, 'agent') and self.agent:
                 self.update_log(
@@ -803,12 +864,29 @@ class PIIWindow(QMainWindow):
                 # Convert to DataFrame if needed
                 if isinstance(data, list):
                     return pd.DataFrame(data)
-                return data
-                
+                elif isinstance(data, str):
+                    # Try to parse as JSON
+                    try:
+                        import json
+                        parsed_data = json.loads(data)
+                        if isinstance(parsed_data, list):
+                            return pd.DataFrame(parsed_data)
+                        else:
+                            return pd.DataFrame([parsed_data])
+                    except:
+                        return pd.DataFrame([{"Raw Response": data}])
+                else:
+                    try:
+                        return pd.DataFrame(data)
+                    except:
+                        QMessageBox.warning(self, "Data Format Error", 
+                            f"Received unexpected data type: {type(data)}. Cannot display.")
+                        return None
+                    
             else:
                 QMessageBox.warning(self, "Error", "Not authenticated. Please connect first.")
                 return None
-                
+                    
         except Exception as e:
             self.update_log(
                 self.assistant.get_current_time() if hasattr(self, 'assistant') else
@@ -1188,30 +1266,104 @@ class PIIWindow(QMainWindow):
                 f"Error refreshing data: {str(e)}"
             )
         
-    def show_data_window(self):
-        """Show window with data table."""
+    def enhanced_show_data_window(self):
+        """Show enhanced data dialog with CRUD capabilities and error handling."""
         if not self.assistant:
             QMessageBox.warning(self, "Error", "Not connected to server.")
             return
 
         try:
-            # Fetch data
-            data = self.process_request()
-            if data is None:
-                return
-
-            # Create and show the modern data dialog
-            data_dialog = ModernDataDialog(self, "Your Guard Data", self.fetch_latest_data)
+            # Log the operation
+            self.update_log(
+                self.assistant.get_current_time() if hasattr(self, 'assistant') else 
+                QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
+                "Opening data display window"
+            )
             
-            # Set the CRUD helper and services
-            data_dialog.set_crud_helper(
-                CRUDHelper,  # The helper class itself
+            # Use the original ModernDataDialog instead of the enhanced one if there are issues
+            use_original_dialog = False
+            
+            # Check if the enhanced dialog is available
+            try:
+                from UI.Desktop.enhanced_data_dialog import EnhancedDataDialog
+            except ImportError:
+                self.update_log(
+                    self.assistant.get_current_time() if hasattr(self, 'assistant') else 
+                    QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
+                    "Enhanced data dialog not available, falling back to original implementation"
+                )
+                use_original_dialog = True
+                
+            if use_original_dialog:
+                # Fall back to original implementation
+                # Fetch data
+                data = self.process_request()
+                if data is None:
+                    return
+
+                # Create and show the modern data dialog from modern_components
+                from UI.Desktop.modern_components import ModernDataDialog
+                data_dialog = ModernDataDialog(self, "Your Guard Data", self.fetch_latest_data)
+                
+                # Set the CRUD helper and services
+                data_dialog.set_crud_helper(
+                    CRUDHelper,  # The helper class itself
+                    auth_service=self.auth_service if hasattr(self, 'auth_service') else None,
+                    agent=self.agent if hasattr(self, 'agent') else None
+                )
+                
+                # Set the data
+                data_dialog.set_data(data)
+                
+                # Connect download button to download function
+                data_dialog.download_btn.clicked.connect(self.download_pii)
+                
+                # Show the dialog
+                data_dialog.exec_()
+                return
+            
+            # Check if we have an API client, create one if not
+            if not hasattr(self, 'api_client'):
+                from UI.Desktop.api_client import APIClient
+                self.api_client = APIClient(
+                    base_url=CONSTANTS.API_BASE_URL,
+                    auth_service=self.auth_service if hasattr(self, 'auth_service') else None
+                )
+                
+                # Log client creation
+                self.update_log(
+                    self.assistant.get_current_time() if hasattr(self, 'assistant') else 
+                    QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
+                    "Created API client for data operations"
+                )
+            
+            # Test the API client connection first to catch any issues early
+            try:
+                success, health_check = self.api_client.sync_make_request("GET", "health")
+                if not success:
+                    error_msg = health_check.get('error', str(health_check)) if isinstance(health_check, dict) else str(health_check)
+                    self.update_log(
+                        self.assistant.get_current_time() if hasattr(self, 'assistant') else 
+                        QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
+                        f"API health check failed: {error_msg}"
+                    )
+                    # Continue anyway, we might still be able to get data
+            except Exception as e:
+                self.update_log(
+                    self.assistant.get_current_time() if hasattr(self, 'assistant') else 
+                    QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
+                    f"API client test request failed: {str(e)}"
+                )
+                # Continue anyway, might work with direct methods
+            
+            # Create and show enhanced data dialog
+            from UI.Desktop.enhanced_data_dialog import EnhancedDataDialog
+            data_dialog = EnhancedDataDialog(
+                self,
+                api_client=self.api_client,
                 auth_service=self.auth_service if hasattr(self, 'auth_service') else None,
                 agent=self.agent if hasattr(self, 'agent') else None
             )
-            
-            # Set the data
-            data_dialog.set_data(data)
             
             # Connect download button to download function
             data_dialog.download_btn.clicked.connect(self.download_pii)
@@ -1225,10 +1377,21 @@ class PIIWindow(QMainWindow):
                 QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
                 f'Error displaying data: {str(e)}'
             )
+            
+            # Show detailed error message
+            import traceback
+            error_details = traceback.format_exc()
+            self.update_log(
+                self.assistant.get_current_time() if hasattr(self, 'assistant') else 
+                QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
+                f'Error details: {error_details}'
+            )
+            
             QMessageBox.critical(
                 self,
                 "Error",
-                f"An unexpected error occurred: {str(e)}"
+                f"An unexpected error occurred when trying to display data:\n\n{str(e)}\n\n"
+                f"Please check the application logs for more details."
             )
 
     def open_context_menu(self, position):
