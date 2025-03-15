@@ -34,7 +34,7 @@ try:
     if not hasattr(pyjwt, 'encode'):
         logger.warning("The imported jwt module doesn't have encode method. Trying PyJWT...")
         # Explicitly try to import PyJWT
-        import PyJWT as pyjwt
+        
         logger.info("Successfully imported PyJWT")
 except ImportError:
     logger.warning("JWT module not found. Trying to install PyJWT...")
@@ -42,7 +42,7 @@ except ImportError:
         import subprocess
         import sys
         subprocess.check_call([sys.executable, "-m", "pip", "install", "PyJWT"])
-        import PyJWT as pyjwt
+        
         logger.info("Successfully installed and imported PyJWT")
     except Exception as e:
         logger.error(f"Failed to install PyJWT: {e}")

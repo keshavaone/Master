@@ -438,6 +438,9 @@ async def system_info(current_user: Dict[str, Any] = Depends(get_current_user)):
         "auth_mode": "JWT and AWS SSO"
     }
 
+
+
+        
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
