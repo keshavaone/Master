@@ -2,21 +2,24 @@
 Enhanced data dialog with proper CRUD functionality for PII data management.
 """
 
-from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, 
-    QPushButton, QLabel, QLineEdit, QComboBox, QMessageBox, QFrame,
-    QHeaderView, QAbstractItemView, QApplication, QSplitter, QWidget,
-    QGroupBox, QFormLayout, QTextEdit, QScrollArea, QSizePolicy, QStyle,
-    QProgressDialog
-)
-from PyQt5.QtCore import Qt, QSize, QTimer, QDateTime
-from PyQt5.QtGui import QIcon, QColor, QPalette, QFont
-import pandas as pd
+import os
 import logging
 import ast
 import json
 import time
 import traceback
+from typing import Any, Dict, List, Tuple, Optional, Union
+
+from PyQt5.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, 
+    QPushButton, QLabel, QLineEdit, QComboBox, QMessageBox, QFrame,
+    QHeaderView, QAbstractItemView, QApplication, QSplitter, QWidget,
+    QGroupBox, QFormLayout, QTextEdit, QScrollArea, QSizePolicy, QStyle,
+    QProgressDialog, QMenu, QDialogButtonBox
+)
+from PyQt5.QtCore import Qt, QSize, QTimer, QDateTime
+from PyQt5.QtGui import QIcon, QColor, QPalette, QFont
+import pandas as pd
 
 class EnhancedDataDialog(QDialog):
     """Enhanced dialog for displaying and managing PII data."""
@@ -161,30 +164,18 @@ class EnhancedDataDialog(QDialog):
         filter_layout.addWidget(search_label)
         filter_layout.addWidget(self.search_input)
         
-        # Add filter explanation text
-        filter_explanation = QLabel("Use filters to narrow down the data shown in the table below")
-        filter_explanation.setStyleSheet("font-style: italic; color: #666; font-size: 10px;")
-        filter_layout.addWidget(filter_explanation)
+        # Add filter section to header
+        header_layout.addWidget(filter_group)
         
-        # Action buttons for header
-        action_layout = QVBoxLayout()
-        action_layout.setContentsMargins(0, 0, 0, 0)
-        action_layout.setSpacing(5)
-        
-        # Button group
+        # Action buttons section
         button_frame = QFrame()
-        button_frame.setStyleSheet("""
-            QFrame {
-                background: transparent;
-            }
-        """)
+        button_frame.setStyleSheet("background: transparent;")
         button_layout = QHBoxLayout(button_frame)
-        button_layout.setContentsMargins(0, 0, 0, 0)
+        button_layout.setContentsMargins(10, 0, 0, 0)
         button_layout.setSpacing(10)
         
         # Refresh button with improved styling
-        self.refresh_btn = QPushButton("Refresh Data")
-        self.refresh_btn.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
+        self.refresh_btn = QPushButton("🔄 Refresh Data")
         self.refresh_btn.setStyleSheet("""
             QPushButton {
                 background-color: #4CAF50;
@@ -204,8 +195,7 @@ class EnhancedDataDialog(QDialog):
         self.refresh_btn.clicked.connect(self.fetch_data)
         
         # Add new button with improved styling
-        self.add_btn = QPushButton("Add New Item")
-        self.add_btn.setIcon(self.style().standardIcon(QStyle.SP_FileDialogNewFolder))
+        self.add_btn = QPushButton("➕ Add New Item")
         self.add_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2196F3;
@@ -225,8 +215,7 @@ class EnhancedDataDialog(QDialog):
         self.add_btn.clicked.connect(self.add_new_item)
         
         # Download button with improved styling
-        self.download_btn = QPushButton("Download All Data")
-        self.download_btn.setIcon(self.style().standardIcon(QStyle.SP_ArrowDown))
+        self.download_btn = QPushButton("⬇️ Download All Data")
         self.download_btn.setStyleSheet("""
             QPushButton {
                 background-color: #9C27B0;
@@ -249,9 +238,11 @@ class EnhancedDataDialog(QDialog):
         button_layout.addWidget(self.refresh_btn)
         button_layout.addWidget(self.add_btn)
         button_layout.addWidget(self.download_btn)
-        action_layout.addWidget(button_frame)
         
-        header_layout.addLayout(action_layout)
+        # Add button section to header
+        header_layout.addWidget(button_frame)
+        
+        # Add header to main layout
         main_layout.addWidget(header_frame)
         
         # Data count label
@@ -266,8 +257,12 @@ class EnhancedDataDialog(QDialog):
         """)
         main_layout.addWidget(self.data_count_label)
         
-        # Table widget
-        self.table = QTableWidget()  # Initialize as self.table to match referenced attribute
+        # Create a splitter for the main content area
+        self.splitter = QSplitter(Qt.Vertical)
+        self.splitter.setChildrenCollapsible(False)
+        
+        # Table widget in the top section of the splitter
+        self.table = QTableWidget()
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(['ID', 'Category', 'Type', 'PII Preview'])
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -296,14 +291,28 @@ class EnhancedDataDialog(QDialog):
         """)
         self.table.setSortingEnabled(True)
         self.table.itemSelectionChanged.connect(self.item_selected)
+        
+        # Enable context menu for the table
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.show_context_menu)
+        
         # Also create table_widget as an alias to self.table for backward compatibility
         self.table_widget = self.table
         
-        main_layout.addWidget(self.table, stretch=1)
+        # Add table to the splitter
+        self.splitter.addWidget(self.table)
         
-        # Detail area (for selected item)
-        details_group = QGroupBox("Item Details")
-        details_group.setStyleSheet("""
+        # Details container for the bottom section of the splitter
+        self.details_container = QWidget()
+        self.details_container.setVisible(False)  # Initially hidden until a row is selected
+        
+        # Details group box inside the container
+        details_layout = QVBoxLayout(self.details_container)
+        details_layout.setContentsMargins(0, 0, 0, 0)
+        details_layout.setSpacing(0)
+        
+        self.details_group = QGroupBox("Item Details")
+        self.details_group.setStyleSheet("""
             QGroupBox {
                 font-weight: bold;
                 border: 1px solid #c0c0c0;
@@ -319,12 +328,18 @@ class EnhancedDataDialog(QDialog):
             }
         """)
         
-        details_layout = QVBoxLayout(details_group)
+        # Make the details section scrollable
+        details_scroll = QScrollArea()
+        details_scroll.setWidgetResizable(True)
+        details_scroll.setFrameShape(QFrame.NoFrame)
+        
+        details_content = QWidget()
+        details_content_layout = QVBoxLayout(details_content)
         
         # Form layout for basic info
         form_layout = QFormLayout()
         form_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
-        form_layout.setContentsMargins(0, 0, 0, 0)
+        form_layout.setContentsMargins(10, 10, 10, 5)
         form_layout.setSpacing(8)
         
         # ID field (read-only)
@@ -341,22 +356,63 @@ class EnhancedDataDialog(QDialog):
         self.type_field = QLineEdit()
         form_layout.addRow("Type:", self.type_field)
         
-        details_layout.addLayout(form_layout)
+        details_content_layout.addLayout(form_layout)
         
-        # Scroll area for PII items
+        # PII Data section
+        pii_group = QGroupBox("PII Data")
+        pii_group.setStyleSheet("""
+            QGroupBox {
+                border: 1px solid #c0c0c0;
+                border-radius: 5px;
+                margin-top: 5px;
+                padding-top: 15px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 0 5px;
+                color: #0066cc;
+            }
+        """)
+        pii_layout = QVBoxLayout(pii_group)
+        
+        # Create a scroll area specifically for PII items
         pii_scroll = QScrollArea()
         pii_scroll.setWidgetResizable(True)
         pii_container = QWidget()
         self.pii_layout = QVBoxLayout(pii_container)
         pii_scroll.setWidget(pii_container)
         pii_scroll.setMinimumHeight(200)
-        details_layout.addWidget(pii_scroll)
+        pii_layout.addWidget(pii_scroll)
+        
+        details_content_layout.addWidget(pii_group)
+        
+        details_scroll.setWidget(details_content)
+        
+        # Add scroll area to details layout
+        details_group_layout = QVBoxLayout(self.details_group)
+        details_group_layout.addWidget(details_scroll)
         
         # Buttons for details
         buttons_layout = QHBoxLayout()
         
-        self.save_btn = QPushButton("Save Changes")
-        self.save_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogSaveButton))
+        clear_btn = QPushButton("🗑️ Clear")
+        clear_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #9E9E9E;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #757575;
+            }
+        """)
+        clear_btn.clicked.connect(self.clear_details)
+        
+        self.save_btn = QPushButton("💾 Save Changes")
         self.save_btn.setStyleSheet("""
             QPushButton {
                 background-color: #4CAF50;
@@ -377,8 +433,7 @@ class EnhancedDataDialog(QDialog):
         self.save_btn.setEnabled(False)
         self.save_btn.clicked.connect(self.save_item)
         
-        self.delete_btn = QPushButton("Delete Item")
-        self.delete_btn.setIcon(self.style().standardIcon(QStyle.SP_TrashIcon))
+        self.delete_btn = QPushButton("❌ Delete Item")
         self.delete_btn.setStyleSheet("""
             QPushButton {
                 background-color: #F44336;
@@ -399,37 +454,30 @@ class EnhancedDataDialog(QDialog):
         self.delete_btn.setEnabled(False)
         self.delete_btn.clicked.connect(self.delete_item)
         
-        clear_btn = QPushButton("Clear")
-        clear_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogResetButton))
-        clear_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #9E9E9E;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #757575;
-            }
-        """)
-        clear_btn.clicked.connect(self.clear_details)
-        
         buttons_layout.addWidget(clear_btn)
         buttons_layout.addStretch()
         buttons_layout.addWidget(self.save_btn)
         buttons_layout.addWidget(self.delete_btn)
         
-        details_layout.addLayout(buttons_layout)
+        details_group_layout.addLayout(buttons_layout)
         
-        main_layout.addWidget(details_group)
+        # Add details group to the container
+        details_layout.addWidget(self.details_group)
+        
+        # Add the details container to the splitter
+        self.splitter.addWidget(self.details_container)
+        
+        # Set initial sizes for the splitter (70% table, 30% details)
+        self.splitter.setSizes([700, 300])
+        
+        # Add the splitter to the main layout
+        main_layout.addWidget(self.splitter, stretch=1)
         
         # Status bar
         self.status_label = QLabel("Ready")
         self.status_label.setStyleSheet("color: #666; font-style: italic;")
         main_layout.addWidget(self.status_label)
-
+        
     def fetch_data(self):
         """Fetch PII data from the server with robust error handling and protection against widget deletion."""
         # Show loading indicator
@@ -775,9 +823,241 @@ class EnhancedDataDialog(QDialog):
                 self.setCursor(Qt.ArrowCursor)
             except RuntimeError:
                 pass
-
-    
+                
+    def populate_table(self):
+        """
+        Populate the table with filtered data using improved styling and formatting.
+        This method ensures consistent appearance and optimal readability.
+        """
+        # Check if table exists
+        if not hasattr(self, 'table') or self.table is None:
+            return
         
+        # Define theme colors for UI consistency
+        class StandardTheme:
+            PRIMARY = "#1976D2"
+            PRIMARY_LIGHT = "#BBDEFB"
+            GRAY_100 = "#F5F5F5"
+            GRAY_300 = "#E0E0E0"
+            GRAY_400 = "#BDBDBD"
+            TEXT_PRIMARY = "#212121"
+            BG_DEFAULT = "#FFFFFF"
+        
+        # Clear existing rows
+        self.table.setRowCount(0)
+        
+        if not self.filtered_data:
+            return
+        
+        # Apply standardized styling to table
+        self.table.setStyleSheet("""
+            QTableWidget {
+                gridline-color: """ + StandardTheme.GRAY_300 + """;
+                border: 1px solid """ + StandardTheme.GRAY_300 + """;
+                border-radius: 4px;
+                selection-background-color: """ + StandardTheme.PRIMARY_LIGHT + """;
+                selection-color: """ + StandardTheme.TEXT_PRIMARY + """;
+                alternate-background-color: """ + StandardTheme.GRAY_100 + """;
+            }
+            QHeaderView::section {
+                background-color: """ + StandardTheme.PRIMARY_LIGHT + """;
+                padding: 6px;
+                border: 1px solid """ + StandardTheme.GRAY_300 + """;
+                font-weight: bold;
+                color: """ + StandardTheme.PRIMARY + """;
+            }
+            QTableWidget::item {
+                padding: 6px;
+            }
+            QTableWidget::item:selected {
+                color: """ + StandardTheme.TEXT_PRIMARY + """;
+            }
+        """)
+        
+        # Configure for alternating row colors
+        self.table.setAlternatingRowColors(True)
+        
+        # Add data with improved styling
+        for row, item in enumerate(self.filtered_data):
+            self.table.insertRow(row)
+            
+            # ID column with monospace font for better readability
+            id_item = QTableWidgetItem(item.get('_id', ''))
+            id_item.setTextAlignment(Qt.AlignCenter)
+            id_item.setFont(QFont("Monospace"))
+            self.table.setItem(row, 0, id_item)
+            
+            # Category column
+            category_item = QTableWidgetItem(item.get('Category', ''))
+            category_item.setTextAlignment(Qt.AlignCenter)
+            category_item.setFont(QFont("", -1, QFont.Bold))
+            self.table.setItem(row, 1, category_item)
+            
+            # Type column
+            type_item = QTableWidgetItem(item.get('Type', ''))
+            type_item.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(row, 2, type_item)
+            
+            # PII Data preview with enhanced formatting
+            pii_text = self.get_pii_preview(item.get('PII', ''))
+            pii_item = QTableWidgetItem(pii_text)
+            self.table.setItem(row, 3, pii_item)
+        
+        # Optimize column widths
+        self.table.resizeColumnsToContents()
+        
+        # Ensure columns are not too narrow or too wide
+        header = self.table.horizontalHeader()
+        
+        # Set minimum and maximum column widths
+        min_widths = [120, 100, 100, 200]  # ID, Category, Type, PII
+        max_widths = [200, 200, 200, 400]  # ID, Category, Type, PII
+        
+        for col in range(min(self.table.columnCount(), len(min_widths))):
+            width = header.sectionSize(col)
+            width = max(width, min_widths[col])
+            width = min(width, max_widths[col])
+            header.resizeSection(col, width)
+        
+        # Allow PII column to stretch
+        header.setSectionResizeMode(3, QHeaderView.Stretch)
+    
+    def get_pii_preview(self, pii_data):
+        """
+        Get an enhanced preview of PII data for table display with improved formatting.
+        
+        Args:
+            pii_data: PII data to preview
+            
+        Returns:
+            str: Enhanced preview text with better formatting
+        """
+        try:
+            # If it's a string, try to parse it as structured data
+            if isinstance(pii_data, str):
+                try:
+                    parsed_data = ast.literal_eval(pii_data)
+                    
+                    if isinstance(parsed_data, list):
+                        # Count total items
+                        item_count = len(parsed_data)
+                        
+                        # Show first few items with better formatting
+                        preview_items = []
+                        max_preview_items = min(item_count, 3)  # Show up to 3 items
+                        
+                        for i, item in enumerate(parsed_data[:max_preview_items]):
+                            if isinstance(item, dict) and 'Item Name' in item and 'Data' in item:
+                                # Format: "Item Name: Data" with length limits
+                                item_name = item['Item Name']
+                                item_data = str(item['Data'])
+                                
+                                # Limit data length for preview
+                                if len(item_data) > 30:
+                                    item_data = item_data[:27] + "..."
+                                    
+                                preview_items.append(f"{item_name}: {item_data}")
+                            else:
+                                # Handle non-standard items
+                                item_str = str(item)
+                                if len(item_str) > 30:
+                                    item_str = item_str[:27] + "..."
+                                preview_items.append(item_str)
+                        
+                        # Format the preview with bullet points
+                        formatted_preview = ""
+                        for i, preview in enumerate(preview_items):
+                            formatted_preview += f"• {preview}\n"
+                        
+                        # Add count if there are more items
+                        if item_count > max_preview_items:
+                            additional = item_count - max_preview_items
+                            formatted_preview += f"(+ {additional} more item{'s' if additional != 1 else ''})"
+                        
+                        return formatted_preview.strip()
+                    elif isinstance(parsed_data, dict):
+                        # For dictionaries, show key-value pairs
+                        preview_items = []
+                        for k, v in list(parsed_data.items())[:3]:  # Show up to 3 key-value pairs
+                            v_str = str(v)
+                            if len(v_str) > 30:
+                                v_str = v_str[:27] + "..."
+                            preview_items.append(f"{k}: {v_str}")
+                        
+                        # Format with bullet points
+                        formatted_preview = ""
+                        for i, preview in enumerate(preview_items):
+                            formatted_preview += f"• {preview}\n"
+                        
+                        # Add indicator if there are more items
+                        if len(parsed_data) > 3:
+                            additional = len(parsed_data) - 3
+                            formatted_preview += f"(+ {additional} more key{'s' if additional != 1 else ''})"
+                        
+                        return formatted_preview.strip()
+                    else:
+                        # For other types, just convert to string
+                        result = str(parsed_data)
+                        if len(result) > 100:
+                            result = result[:97] + "..."
+                        return result
+                except (SyntaxError, ValueError):
+                    # If parsing fails, just return the string with length limit
+                    if len(pii_data) > 100:
+                        return pii_data[:97] + "..."
+                    return pii_data
+            elif isinstance(pii_data, dict):
+                # For dictionaries, show key-value pairs
+                preview_items = []
+                for k, v in list(pii_data.items())[:3]:  # Show up to 3 key-value pairs
+                    v_str = str(v)
+                    if len(v_str) > 30:
+                        v_str = v_str[:27] + "..."
+                    preview_items.append(f"{k}: {v_str}")
+                
+                # Format with bullet points
+                formatted_preview = ""
+                for i, preview in enumerate(preview_items):
+                    formatted_preview += f"• {preview}\n"
+                
+                # Add indicator if there are more items
+                if len(pii_data) > 3:
+                    additional = len(pii_data) - 3
+                    formatted_preview += f"(+ {additional} more key{'s' if additional != 1 else ''})"
+                
+                return formatted_preview.strip()
+            elif isinstance(pii_data, list):
+                # Format list items
+                preview_items = []
+                max_items = min(len(pii_data), 3)
+                
+                for i in range(max_items):
+                    item_str = str(pii_data[i])
+                    if len(item_str) > 30:
+                        item_str = item_str[:27] + "..."
+                    preview_items.append(item_str)
+                
+                # Format with bullet points
+                formatted_preview = ""
+                for i, preview in enumerate(preview_items):
+                    formatted_preview += f"• {preview}\n"
+                
+                # Add count if there are more items
+                if len(pii_data) > max_items:
+                    additional = len(pii_data) - max_items
+                    formatted_preview += f"(+ {additional} more item{'s' if additional != 1 else ''})"
+                
+                return formatted_preview.strip()
+            else:
+                # For other types, just convert to string with length limit
+                result = str(pii_data)
+                if len(result) > 100:
+                    result = result[:97] + "..."
+                return result
+        except Exception as e:
+            # In case of errors, return a safe fallback
+            return f"Preview unavailable ({type(pii_data).__name__})"
+            
     def display_item_details(self, item):
         """
         Display item details in the form with highly improved PII data visualization.
@@ -788,7 +1068,7 @@ class EnhancedDataDialog(QDialog):
         """
         # Clear existing details first
         try:
-            self.clear_details()
+            self.clear_pii_fields()
         except RuntimeError:
             self.logger.warning("Error clearing details - widget may have been deleted")
             return
@@ -1103,8 +1383,6 @@ class EnhancedDataDialog(QDialog):
             except RuntimeError:
                 self.logger.warning("Error adding error information - widget may have been deleted")    
         
-                
-    
     def copy_to_clipboard(self, data):
         """
         Copy data to clipboard with visual confirmation.
@@ -1150,252 +1428,14 @@ class EnhancedDataDialog(QDialog):
         
         self.logger.info(f"Copied data to clipboard: {str(data)[:30]}...")
 
-    def populate_table(self):
-        """
-        Populate the table with filtered data using improved styling and formatting.
-        This method ensures consistent appearance and optimal readability.
-        """
-        # Check if table exists
-        if not hasattr(self, 'table') or self.table is None:
-            return
-        
-        try:
-            # Import the StandardTheme for consistent styling
-            from UI.Desktop.standard_theme import StandardTheme
-        except ImportError:
-            # If import fails, use a local reference to colors
-            class StandardTheme:
-                PRIMARY = "#1976D2"
-                PRIMARY_LIGHT = "#BBDEFB"
-                GRAY_100 = "#F5F5F5"
-                GRAY_300 = "#E0E0E0"
-                GRAY_400 = "#BDBDBD"
-                TEXT_PRIMARY = "#212121"
-                BG_DEFAULT = "#FFFFFF"
-        
-        # Clear existing rows
-        self.table.setRowCount(0)
-        
-        if not self.filtered_data:
-            return
-        
-        # Apply standardized styling to table
-        self.table.setStyleSheet("""
-            QTableWidget {
-                gridline-color: """ + StandardTheme.GRAY_300 + """;
-                border: 1px solid """ + StandardTheme.GRAY_300 + """;
-                border-radius: 4px;
-                selection-background-color: """ + StandardTheme.PRIMARY_LIGHT + """;
-                selection-color: """ + StandardTheme.TEXT_PRIMARY + """;
-                alternate-background-color: """ + StandardTheme.GRAY_100 + """;
-            }
-            QHeaderView::section {
-                background-color: """ + StandardTheme.PRIMARY_LIGHT + """;
-                padding: 6px;
-                border: 1px solid """ + StandardTheme.GRAY_300 + """;
-                font-weight: bold;
-                color: """ + StandardTheme.PRIMARY + """;
-            }
-            QTableWidget::item {
-                padding: 6px;
-            }
-            QTableWidget::item:selected {
-                color: """ + StandardTheme.TEXT_PRIMARY + """;
-            }
-        """)
-        
-        # Configure for alternating row colors
-        self.table.setAlternatingRowColors(True)
-        
-        # Add data with improved styling
-        for row, item in enumerate(self.filtered_data):
-            self.table.insertRow(row)
-            
-            # ID column with monospace font for better readability
-            id_item = QTableWidgetItem(item.get('_id', ''))
-            id_item.setTextAlignment(Qt.AlignCenter)
-            id_item.setFont(QFont("Monospace"))
-            self.table.setItem(row, 0, id_item)
-            
-            # Category column
-            category_item = QTableWidgetItem(item.get('Category', ''))
-            category_item.setTextAlignment(Qt.AlignCenter)
-            category_item.setFont(QFont("", -1, QFont.Bold))
-            self.table.setItem(row, 1, category_item)
-            
-            # Type column
-            type_item = QTableWidgetItem(item.get('Type', ''))
-            type_item.setTextAlignment(Qt.AlignCenter)
-            self.table.setItem(row, 2, type_item)
-            
-            # PII Data preview with enhanced formatting
-            pii_text = self.get_pii_preview(item.get('PII', ''))
-            pii_item = QTableWidgetItem(pii_text)
-            self.table.setItem(row, 3, pii_item)
-        
-        # Optimize column widths
-        self.table.resizeColumnsToContents()
-        
-        # Ensure columns are not too narrow or too wide
-        header = self.table.horizontalHeader()
-        
-        # Set minimum and maximum column widths
-        min_widths = [120, 100, 100, 200]  # ID, Category, Type, PII
-        max_widths = [200, 200, 200, 400]  # ID, Category, Type, PII
-        
-        for col in range(min(self.table.columnCount(), len(min_widths))):
-            width = header.sectionSize(col)
-            width = max(width, min_widths[col])
-            width = min(width, max_widths[col])
-            header.resizeSection(col, width)
-        
-        # Allow PII column to stretch
-        header.setSectionResizeMode(3, QHeaderView.Stretch)
-
-
-    def get_pii_preview(self, pii_data):
-        """
-        Get an enhanced preview of PII data for table display with improved formatting.
-        
-        Args:
-            pii_data: PII data to preview
-            
-        Returns:
-            str: Enhanced preview text with better formatting
-        """
-        try:
-            # If it's a string, try to parse it as structured data
-            if isinstance(pii_data, str):
-                try:
-                    parsed_data = ast.literal_eval(pii_data)
-                    
-                    if isinstance(parsed_data, list):
-                        # Count total items
-                        item_count = len(parsed_data)
-                        
-                        # Show first few items with better formatting
-                        preview_items = []
-                        max_preview_items = min(item_count, 3)  # Show up to 3 items
-                        
-                        for i, item in enumerate(parsed_data[:max_preview_items]):
-                            if isinstance(item, dict) and 'Item Name' in item and 'Data' in item:
-                                # Format: "Item Name: Data" with length limits
-                                item_name = item['Item Name']
-                                item_data = str(item['Data'])
-                                
-                                # Limit data length for preview
-                                if len(item_data) > 30:
-                                    item_data = item_data[:27] + "..."
-                                    
-                                preview_items.append(f"{item_name}: {item_data}")
-                            else:
-                                # Handle non-standard items
-                                item_str = str(item)
-                                if len(item_str) > 30:
-                                    item_str = item_str[:27] + "..."
-                                preview_items.append(item_str)
-                        
-                        # Format the preview with bullet points
-                        formatted_preview = ""
-                        for i, preview in enumerate(preview_items):
-                            formatted_preview += f"• {preview}\n"
-                        
-                        # Add count if there are more items
-                        if item_count > max_preview_items:
-                            additional = item_count - max_preview_items
-                            formatted_preview += f"(+ {additional} more item{'s' if additional != 1 else ''})"
-                        
-                        return formatted_preview.strip()
-                    elif isinstance(parsed_data, dict):
-                        # For dictionaries, show key-value pairs
-                        preview_items = []
-                        for k, v in list(parsed_data.items())[:3]:  # Show up to 3 key-value pairs
-                            v_str = str(v)
-                            if len(v_str) > 30:
-                                v_str = v_str[:27] + "..."
-                            preview_items.append(f"{k}: {v_str}")
-                        
-                        # Format with bullet points
-                        formatted_preview = ""
-                        for i, preview in enumerate(preview_items):
-                            formatted_preview += f"• {preview}\n"
-                        
-                        # Add indicator if there are more items
-                        if len(parsed_data) > 3:
-                            additional = len(parsed_data) - 3
-                            formatted_preview += f"(+ {additional} more key{'s' if additional != 1 else ''})"
-                        
-                        return formatted_preview.strip()
-                    else:
-                        # For other types, just convert to string
-                        result = str(parsed_data)
-                        if len(result) > 100:
-                            result = result[:97] + "..."
-                        return result
-                except (SyntaxError, ValueError):
-                    # If parsing fails, just return the string with length limit
-                    if len(pii_data) > 100:
-                        return pii_data[:97] + "..."
-                    return pii_data
-            elif isinstance(pii_data, dict):
-                # For dictionaries, show key-value pairs
-                preview_items = []
-                for k, v in list(pii_data.items())[:3]:  # Show up to 3 key-value pairs
-                    v_str = str(v)
-                    if len(v_str) > 30:
-                        v_str = v_str[:27] + "..."
-                    preview_items.append(f"{k}: {v_str}")
-                
-                # Format with bullet points
-                formatted_preview = ""
-                for i, preview in enumerate(preview_items):
-                    formatted_preview += f"• {preview}\n"
-                
-                # Add indicator if there are more items
-                if len(pii_data) > 3:
-                    additional = len(pii_data) - 3
-                    formatted_preview += f"(+ {additional} more key{'s' if additional != 1 else ''})"
-                
-                return formatted_preview.strip()
-            elif isinstance(pii_data, list):
-                # Format list items
-                preview_items = []
-                max_items = min(len(pii_data), 3)
-                
-                for i in range(max_items):
-                    item_str = str(pii_data[i])
-                    if len(item_str) > 30:
-                        item_str = item_str[:27] + "..."
-                    preview_items.append(item_str)
-                
-                # Format with bullet points
-                formatted_preview = ""
-                for i, preview in enumerate(preview_items):
-                    formatted_preview += f"• {preview}\n"
-                
-                # Add count if there are more items
-                if len(pii_data) > max_items:
-                    additional = len(pii_data) - max_items
-                    formatted_preview += f"(+ {additional} more item{'s' if additional != 1 else ''})"
-                
-                return formatted_preview.strip()
-            else:
-                # For other types, just convert to string with length limit
-                result = str(pii_data)
-                if len(result) > 100:
-                    result = result[:97] + "..."
-                return result
-        except Exception as e:
-            # In case of errors, return a safe fallback
-            return f"Preview unavailable ({type(pii_data).__name__})"
-        
     def clear_pii_fields(self):
         """Clear all PII fields."""
         # Remove all widgets from the PII layout
-        while self.pii_layout.count():
-            item = self.pii_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        if hasattr(self, 'pii_layout'):
+            while self.pii_layout.count():
+                item = self.pii_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
                 
     def add_pii_field(self, name="", value=""):
         """
@@ -1665,18 +1705,7 @@ class EnhancedDataDialog(QDialog):
                 # Continue to next field
         
         return pii_items
-        
-    def add_new_item(self):
-        """Show empty form to add a new item."""
-        # Clear details
-        self.clear_details()
-        
-        # Add default PII field
-        self.add_pii_field("New Field", "")
-        
-        # Enable save button
-        self.save_btn.setEnabled(True)
-        
+
     def save_item(self):
         """Save the current item with enhanced validation and user feedback."""
         # Get basic fields
@@ -1768,6 +1797,7 @@ class EnhancedDataDialog(QDialog):
                 # Clear form if this was a new item
                 if not is_update:
                     self.clear_details()
+                    self.details_container.setVisible(False)
             else:
                 error_msg = result.get('error', str(result)) if isinstance(result, dict) else str(result)
                 raise ValueError(error_msg)
@@ -1779,9 +1809,8 @@ class EnhancedDataDialog(QDialog):
         finally:
             # Ensure progress dialog is closed
             progress.close()
-            progress = None
             
-    def create_item(self, item_data):
+    def create_item(self, item_data: Dict[str, Any]) -> Tuple[bool, Any]:
         """
         Create a new item.
         
@@ -1835,7 +1864,7 @@ class EnhancedDataDialog(QDialog):
         # No available methods
         return False, {"error": "No data source available (API client, auth service, or agent)"}
     
-    def update_item(self, item_data):
+    def update_item(self, item_data: Dict[str, Any]) -> Tuple[bool, Any]:
         """
         Update an existing item.
         
@@ -1890,50 +1919,132 @@ class EnhancedDataDialog(QDialog):
         return False, {"error": "No data source available (API client, auth service, or agent)"}
             
     def delete_item(self):
-        """Delete the current item."""
-        if not self.current_item:
-            return
-            
-        # Get item ID
+        """Delete the current item with confirmation."""
+        # Get item ID to delete
         item_id = self.id_field.text().strip()
-        
         if not item_id:
-            QMessageBox.warning(self, "Delete Error", "No item selected for deletion")
+            QMessageBox.warning(self, "Delete Error", "No item selected to delete")
             return
-            
+        
+        # Get item details for confirmation
+        category = self.category_field.text().strip()
+        type_ = self.type_field.text().strip()
+        
         # Confirm deletion
         reply = QMessageBox.question(
-            self,
+            self, 
             "Confirm Deletion",
-            f"Are you sure you want to delete this item?\n\nCategory: {self.category_field.text()}\nType: {self.type_field.text()}\n\nThis action cannot be undone.",
+            f"Are you sure you want to delete this item?\n\n"
+            f"ID: {item_id}\n"
+            f"Category: {category}\n"
+            f"Type: {type_}\n\n"
+            f"This action cannot be undone.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
         
         if reply != QMessageBox.Yes:
             return
-            
-        # Create delete data
+        
+        # Show progress dialog
+        progress = QProgressDialog("Deleting item...", "Cancel", 0, 100, self)
+        progress.setWindowTitle("Delete Item")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setValue(10)
+        progress.show()
+        QApplication.processEvents()
+        
+        # Create delete data payload
         delete_data = {
             "_id": item_id,
-            "Category": self.category_field.text(),
-            "Type": self.type_field.text()
+            "Category": category,
+            "Type": type_
         }
         
-        # Show progress
-        self.setCursor(Qt.WaitCursor)
-        
         try:
-            success, result = self.delete_item_data(delete_data)
+            # Try API client first
+            if self.api_client:
+                self.logger.info(f"Deleting item with ID {item_id} using API client")
+                progress.setValue(30)
+                QApplication.processEvents()
                 
+                success, result = self.api_client.sync_delete_pii_item(
+                    item_id=item_id,
+                    category=category,
+                    type_=type_
+                )
+                
+            # Fall back to auth_service
+            elif self.auth_service:
+                self.logger.info(f"Deleting item with ID {item_id} using auth service")
+                progress.setValue(30)
+                QApplication.processEvents()
+                
+                # Use direct sync method if available
+                if hasattr(self.auth_service, 'make_synchronous_request'):
+                    success, result = self.auth_service.make_synchronous_request(
+                        method="DELETE",
+                        endpoint="pii",
+                        data=delete_data
+                    )
+                # Otherwise use async method with workaround
+                elif hasattr(self.auth_service, 'make_authenticated_request'):
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    try:
+                        success, result = loop.run_until_complete(
+                            self.auth_service.make_authenticated_request(
+                                method="DELETE",
+                                endpoint="pii",
+                                data=delete_data
+                            )
+                        )
+                    finally:
+                        loop.close()
+                else:
+                    raise ValueError("Auth service does not have a suitable request method")
+                
+            # Last resort: try agent directly
+            elif self.agent:
+                self.logger.info(f"Deleting item with ID {item_id} using direct agent")
+                progress.setValue(30)
+                QApplication.processEvents()
+                
+                result = self.agent.delete_one_data(delete_data)
+                
+                # Handle different return types
+                if result is True:
+                    success = True
+                    result = {"message": "Item deleted successfully"}
+                elif isinstance(result, Exception):
+                    success = False
+                    result = {"error": str(result)}
+                else:
+                    # Assume success if not clearly an error
+                    success = True
+            else:
+                raise ValueError("No data source available (API client, auth service, or agent)")
+            
+            # Process result
+            progress.setValue(70)
+            QApplication.processEvents()
+            
             if success:
-                QMessageBox.information(self, "Success", "Item deleted successfully")
+                progress.setValue(100)
+                QApplication.processEvents()
+                
+                QMessageBox.information(
+                    self, 
+                    "Success", 
+                    "Item deleted successfully"
+                )
+                
+                # Clear details
+                self.clear_details()
+                self.details_container.setVisible(False)
                 
                 # Refresh data
                 self.fetch_data()
-                
-                # Clear form
-                self.clear_details()
             else:
                 error_msg = result.get('error', str(result)) if isinstance(result, dict) else str(result)
                 raise ValueError(error_msg)
@@ -1943,328 +2054,9 @@ class EnhancedDataDialog(QDialog):
             QMessageBox.critical(self, "Delete Error", f"Failed to delete item: {str(e)}")
             
         finally:
-            self.setCursor(Qt.ArrowCursor)
-            
-    def delete_item_data(self, delete_data):
-        """
-        Delete an item.
-        
-        Args:
-            delete_data (dict): Item data to delete
-            
-        Returns:
-            tuple: (success, result)
-        """
-        # Try API client first
-        if self.api_client:
-            return self.api_client.sync_delete_pii_item(
-                delete_data["_id"],
-                delete_data.get("Category"),
-                delete_data.get("Type")
-            )
-            
-        # Fall back to auth_service
-        elif self.auth_service:
-            # Use direct sync method if available
-            if hasattr(self.auth_service, 'make_synchronous_request'):
-                return self.auth_service.make_synchronous_request(
-                    method="DELETE",
-                    endpoint="pii",
-                    data=delete_data
-                )
-            # Otherwise use async method with workaround
-            elif hasattr(self.auth_service, 'make_authenticated_request'):
-                import asyncio
-                loop = asyncio.new_event_loop()
-                try:
-                    return loop.run_until_complete(
-                        self.auth_service.make_authenticated_request(
-                            method="DELETE",
-                            endpoint="pii",
-                            data=delete_data
-                        )
-                    )
-                finally:
-                    loop.close()
-                    
-        # Last resort: try agent directly
-        elif self.agent:
-            result = self.agent.delete_one_data(delete_data)
-            
-            # Handle different return types
-            if result is True:
-                return True, {"message": "Item deleted successfully"}
-            elif isinstance(result, Exception):
-                return False, {"error": str(result)}
-            else:
-                # Assume success if not clearly an error
-                return True, result
+            # Ensure progress dialog is closed
+            progress.close()
                 
-        # No available methods
-        return False, {"error": "No data source available (API client, auth service, or agent)"}
-    
-    def update_filters(self):
-        """Update filter dropdowns with available options, protecting against widget deletion."""
-        if not self.data:
-            return
-                
-        # Save current selections only if widgets are still valid
-        try:
-            current_category = self.category_filter.currentText()
-        except RuntimeError:  # Widget has been deleted
-            current_category = "All Categories"
-            
-        try:
-            current_type = self.type_filter.currentText()
-        except RuntimeError:  # Widget has been deleted
-            current_type = "All Types"
-        
-        # Get unique categories and types
-        categories = set()
-        types = set()
-        
-        for item in self.data:
-            category = item.get('Category', '')
-            type_ = item.get('Type', '')
-            
-            if category:
-                categories.add(category)
-            if type_:
-                types.add(type_)
-        
-        # Check if widgets are still valid before updating
-        try:
-            # Clear and repopulate category filter
-            self.category_filter.blockSignals(True)  # Block signals to prevent multiple updates
-            self.category_filter.clear()
-            self.category_filter.addItem("All Categories")
-            self.category_filter.addItems(sorted(categories))
-            
-            # Restore selections or default to "All"
-            category_index = self.category_filter.findText(current_category)
-            if category_index >= 0:
-                self.category_filter.setCurrentIndex(category_index)
-            self.category_filter.blockSignals(False)  # Unblock signals
-        except RuntimeError:
-            self.logger.warning("Category filter widget has been deleted")
-        
-        try:
-            # Clear and repopulate type filter
-            self.type_filter.blockSignals(True)  # Block signals to prevent multiple updates
-            self.type_filter.clear()
-            self.type_filter.addItem("All Types")
-            self.type_filter.addItems(sorted(types))
-            
-            # Restore selections or default to "All"
-            type_index = self.type_filter.findText(current_type)
-            if type_index >= 0:
-                self.type_filter.setCurrentIndex(type_index)
-            self.type_filter.blockSignals(False)  # Unblock signals
-        except RuntimeError:
-            self.logger.warning("Type filter widget has been deleted")
-
-    def apply_filters(self):
-        """Apply filters to the data with protection against widget deletion."""
-        if not self.data:
-            return
-                
-        # Get filter values safely
-        try:
-            category = self.category_filter.currentText()
-        except RuntimeError:  # Widget has been deleted
-            category = "All Categories"
-            
-        try:
-            type_ = self.type_filter.currentText()
-        except RuntimeError:  # Widget has been deleted
-            type_ = "All Types"
-            
-        try:
-            search_text = self.search_input.text().lower()
-        except RuntimeError:  # Widget has been deleted
-            search_text = ""
-        
-        # Apply filters
-        self.filtered_data = []
-        
-        for item in self.data:
-            # Category filter
-            if category != "All Categories" and item.get('Category', '') != category:
-                continue
-                    
-            # Type filter
-            if type_ != "All Types" and item.get('Type', '') != type_:
-                continue
-                    
-            # Search filter
-            if search_text:
-                # Search in all fields
-                found = False
-                for key, value in item.items():
-                    if search_text in str(value).lower():
-                        found = True
-                        break
-                    
-                if not found:
-                    continue
-                
-            # Item passed all filters
-            self.filtered_data.append(item)
-        
-        # Update data count label safely
-        try:
-            if hasattr(self, 'data_count_label'):
-                total_count = len(self.data)
-                filtered_count = len(self.filtered_data)
-                
-                if filtered_count == total_count:
-                    self.data_count_label.setText(f"Showing all {total_count} items")
-                else:
-                    self.data_count_label.setText(f"Showing {filtered_count} of {total_count} items")
-                
-                # Set color based on filter status
-                if filtered_count == 0:
-                    self.data_count_label.setStyleSheet("""
-                        font-weight: bold;
-                        color: #e53935;
-                        padding: 5px;
-                        background-color: #ffebee;
-                        border-radius: 4px;
-                        margin: 5px 0;
-                    """)
-                elif filtered_count < total_count:
-                    self.data_count_label.setStyleSheet("""
-                        font-weight: bold;
-                        color: #f57c00;
-                        padding: 5px;
-                        background-color: #fff3e0;
-                        border-radius: 4px;
-                        margin: 5px 0;
-                    """)
-                else:
-                    self.data_count_label.setStyleSheet("""
-                        font-weight: bold;
-                        color: #0066cc;
-                        padding: 5px;
-                        background-color: #e6f2ff;
-                        border-radius: 4px;
-                        margin: 5px 0;
-                    """)
-        except RuntimeError:
-            self.logger.warning("Data count label widget has been deleted")
-                
-        # Update table with filtered data safely
-        try:
-            self.populate_table()
-        except RuntimeError:
-            self.logger.warning("Error updating table, widget may have been deleted")
-        
-        # Update status message safely
-        try:
-            if hasattr(self, 'status_label'):
-                if self.filtered_data:
-                    total_pii_count = 0
-                    for item in self.filtered_data:
-                        pii_data = item.get('PII', '')
-                        try:
-                            if isinstance(pii_data, str):
-                                parsed = ast.literal_eval(pii_data)
-                                if isinstance(parsed, list):
-                                    total_pii_count += len(parsed)
-                        except:
-                            # Skip items that can't be parsed
-                            pass
-                            
-                    self.status_label.setText(f"Found {len(self.filtered_data)} items containing approximately {total_pii_count} PII fields")
-                else:
-                    self.status_label.setText("No items match the current filters")
-        except RuntimeError:
-            self.logger.warning("Status label widget has been deleted")
-
-    def item_selected(self):
-        """Handle item selection in the table with protection against widget deletion."""
-        try:
-            selected_rows = self.table.selectedItems()
-            if not selected_rows:
-                # Clear details if nothing selected
-                self.clear_details()
-                return
-                    
-            # Get the row of the first selected item
-            row = selected_rows[0].row()
-            
-            # Get the item ID from the first column
-            item_id = self.table.item(row, 0).text()
-            
-            # Find this item in our data
-            item = next((item for item in self.filtered_data if item.get('_id', '') == item_id), None)
-            
-            if item:
-                # Store current item
-                self.current_item = item
-                
-                # Display item details
-                self.display_item_details(item)
-                
-                # Enable edit/delete buttons safely
-                try:
-                    if hasattr(self, 'save_btn'):
-                        self.save_btn.setEnabled(True)
-                except RuntimeError:
-                    pass
-                    
-                try:
-                    if hasattr(self, 'delete_btn'):
-                        self.delete_btn.setEnabled(True)
-                except RuntimeError:
-                    pass
-            else:
-                self.clear_details()
-        except RuntimeError:
-            self.logger.warning("Error during item selection, widget may have been deleted")
-        except Exception as e:
-            self.logger.error(f"Error selecting item: {str(e)}")
-
-    def clear_details(self):
-        """Clear all details fields with protection against widget deletion."""
-        # Clear basic fields safely
-        try:
-            if hasattr(self, 'id_field'):
-                self.id_field.setText("")
-        except RuntimeError:
-            pass
-            
-        try:
-            if hasattr(self, 'category_field'):
-                self.category_field.setText("")
-        except RuntimeError:
-            pass
-            
-        try:
-            if hasattr(self, 'type_field'):
-                self.type_field.setText("")
-        except RuntimeError:
-            pass
-        
-        # Clear PII fields
-        self.clear_pii_fields()
-        
-        # Disable buttons safely
-        try:
-            if hasattr(self, 'save_btn'):
-                self.save_btn.setEnabled(False)
-        except RuntimeError:
-            pass
-            
-        try:
-            if hasattr(self, 'delete_btn'):
-                self.delete_btn.setEnabled(False)
-        except RuntimeError:
-            pass
-        
-        # Clear current item
-        self.current_item = None
-    
     def apply_filters(self):
         """
         Apply filters to the data with advanced search capabilities and robust error handling.
@@ -2273,20 +2065,16 @@ class EnhancedDataDialog(QDialog):
         if not self.data:
             return
         
-        try:
-            # Import the StandardTheme for consistent styling
-            from UI.Desktop.standard_theme import StandardTheme
-        except ImportError:
-            # If import fails, use a local reference to colors
-            class StandardTheme:
-                PRIMARY = "#1976D2"
-                SUCCESS = "#4CAF50"
-                SUCCESS_LIGHT = "#E8F5E9" 
-                DANGER = "#F44336"
-                DANGER_LIGHT = "#FFEBEE"
-                WARNING = "#FF9800"
-                WARNING_LIGHT = "#FFF3E0"
-                TEXT_PRIMARY = "#212121"
+        # Define theme colors for UI styling
+        class StandardTheme:
+            PRIMARY = "#1976D2"
+            SUCCESS = "#4CAF50"
+            SUCCESS_LIGHT = "#E8F5E9" 
+            DANGER = "#F44336"
+            DANGER_LIGHT = "#FFEBEE"
+            WARNING = "#FF9800"
+            WARNING_LIGHT = "#FFF3E0"
+            TEXT_PRIMARY = "#212121"
                 
         # Get filter values safely with defaults
         category = "All Categories"
@@ -2363,18 +2151,7 @@ class EnhancedDataDialog(QDialog):
         
         # Log performance if it's slow
         if filter_time > 0.1:  # Only log if filtering took more than 100ms
-            try:
-                if hasattr(self, 'update_log'):
-                    timestamp = QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
-                    if hasattr(self, 'assistant') and self.assistant:
-                        timestamp = self.assistant.get_current_time()
-                    
-                    self.update_log(
-                        timestamp,
-                        f"Filter applied in {filter_time:.3f}s ({len(self.filtered_data)} of {len(self.data)} items)"
-                    )
-            except:
-                pass
+            self.logger.info(f"Filter applied in {filter_time:.3f}s ({len(self.filtered_data)} of {len(self.data)} items)")
         
         # Update UI to reflect filter results
         try:
@@ -2382,7 +2159,7 @@ class EnhancedDataDialog(QDialog):
                 total_count = len(self.data)
                 filtered_count = len(self.filtered_data)
                 
-                # Use more descriptive message
+                # Use more descriptive message based on filter results
                 if filtered_count == 0:
                     self.data_count_label.setText(f"No items match the current filters (from {total_count} total)")
                     self.data_count_label.setStyleSheet(f"""
@@ -2472,8 +2249,7 @@ class EnhancedDataDialog(QDialog):
                     self.status_label.setStyleSheet(f"color: {StandardTheme.DANGER}; font-weight: bold;")
         except (RuntimeError, AttributeError):
             pass
-
-
+            
     def update_filters(self):
         """
         Update filter dropdowns with available options, ensuring filters work correctly.
@@ -2515,7 +2291,7 @@ class EnhancedDataDialog(QDialog):
             
             # Add categories with counts
             for category, count in sorted(categories.items()):
-                self.category_filter.addItem(f"{category} ({count})")
+                self.category_filter.addItem(f"{category}")
             
             # Restore previous selection or close match
             if current_category != "All Categories":
@@ -2547,7 +2323,7 @@ class EnhancedDataDialog(QDialog):
             
             # Add types with counts
             for type_, count in sorted(types.items()):
-                self.type_filter.addItem(f"{type_} ({count})")
+                self.type_filter.addItem(f"{type_}")
             
             # Restore previous selection or close match
             if current_type != "All Types":
@@ -2570,3 +2346,152 @@ class EnhancedDataDialog(QDialog):
             self.type_filter.blockSignals(False)  # Unblock signals
         except (RuntimeError, AttributeError):
             pass
+
+    def item_selected(self):
+        """Handle item selection in the table with protection against widget deletion."""
+        try:
+            selected_rows = self.table.selectedItems()
+            if not selected_rows:
+                # Clear details if nothing selected
+                self.clear_details()
+                self.details_container.setVisible(False)
+                return
+                    
+            # Get the row of the first selected item
+            row = selected_rows[0].row()
+            
+            # Get the item ID from the first column
+            item_id = self.table.item(row, 0).text()
+            
+            # Find this item in our data
+            item = next((item for item in self.filtered_data if item.get('_id', '') == item_id), None)
+            
+            if item:
+                # Store current item
+                self.current_item = item
+                
+                # Display item details
+                self.display_item_details(item)
+                
+                # Make details section visible
+                self.details_container.setVisible(True)
+                
+                # Enable edit/delete buttons safely
+                try:
+                    if hasattr(self, 'save_btn'):
+                        self.save_btn.setEnabled(True)
+                except RuntimeError:
+                    pass
+                    
+                try:
+                    if hasattr(self, 'delete_btn'):
+                        self.delete_btn.setEnabled(True)
+                except RuntimeError:
+                    pass
+            else:
+                self.clear_details()
+                self.details_container.setVisible(False)
+        except RuntimeError:
+            self.logger.warning("Error during item selection, widget may have been deleted")
+        except Exception as e:
+            self.logger.error(f"Error selecting item: {str(e)}")
+
+    def clear_details(self):
+        """Clear all details fields with protection against widget deletion."""
+        # Clear basic fields safely
+        try:
+            if hasattr(self, 'id_field'):
+                self.id_field.setText("")
+        except RuntimeError:
+            pass
+            
+        try:
+            if hasattr(self, 'category_field'):
+                self.category_field.setText("")
+        except RuntimeError:
+            pass
+            
+        try:
+            if hasattr(self, 'type_field'):
+                self.type_field.setText("")
+        except RuntimeError:
+            pass
+        
+        # Clear PII fields
+        self.clear_pii_fields()
+        
+        # Disable buttons safely
+        try:
+            if hasattr(self, 'save_btn'):
+                self.save_btn.setEnabled(False)
+        except RuntimeError:
+            pass
+            
+        try:
+            if hasattr(self, 'delete_btn'):
+                self.delete_btn.setEnabled(False)
+        except RuntimeError:
+            pass
+        
+        # Clear current item
+        self.current_item = None
+
+    def add_new_item(self):
+        """Show empty form to add a new item."""
+        # Clear details
+        self.clear_details()
+        
+        # Make details section visible
+        self.details_container.setVisible(True)
+        
+        # Add default PII field
+        self.add_pii_field("New Field", "")
+        
+        # Enable save button
+        self.save_btn.setEnabled(True)
+        
+    def show_context_menu(self, position):
+        """
+        Show a context menu when right-clicking on a table row.
+        
+        Args:
+            position: The position where the right-click occurred
+        """
+        # Only show if there's a row selected
+        selected_rows = self.table.selectedItems()
+        if not selected_rows:
+            return
+            
+        # Create context menu
+        context_menu = QMenu(self)
+        
+        # Add View action
+        view_action = context_menu.addAction("👁️ View Details")
+        
+        # Add Edit action  
+        edit_action = context_menu.addAction("✏️ Edit")
+        
+        # Add Delete action
+        delete_action = context_menu.addAction("🗑️ Delete")
+        
+        # Get action
+        action = context_menu.exec_(self.table.mapToGlobal(position))
+        
+        # Handle actions
+        if action == view_action:
+            # Show details without making them editable
+            if hasattr(self, 'category_field'):
+                self.category_field.setReadOnly(True)
+            if hasattr(self, 'type_field'):
+                self.type_field.setReadOnly(True)
+            self.save_btn.setEnabled(False)
+        elif action == edit_action:
+            # Enable editing
+            if hasattr(self, 'category_field'):
+                self.category_field.setReadOnly(False)
+            if hasattr(self, 'type_field'):
+                self.type_field.setReadOnly(False)
+            self.save_btn.setEnabled(True)
+        elif action == delete_action:
+            # Delete the selected item
+            self.delete_item()

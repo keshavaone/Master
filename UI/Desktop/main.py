@@ -3147,7 +3147,7 @@ class PIIWindow(QMainWindow):
                 f"AWS SSO authentication successful - Session valid for {session_info['remaining_formatted']}"
             )
             self.btn_sso_login.setVisible(False)
-            self.btn_logout.setDisabled(True)
+            # self.btn_logout.setDisabled(True)
         else:
             # Reset button state
             self.btn_sso_login.setText('AWS SSO Login')
