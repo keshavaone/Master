@@ -507,37 +507,144 @@ class PIIWindow(QMainWindow):
         except Exception as e:
             print(f"Error logging YouTube init: {e}")
 
-    # Modify the logout_user method to keep the YouTube downloader tab accessible
-    def logout_user(self):
-        """Perform logout operations."""
-        if not self.assistant:
-            QMessageBox.warning(self, "Logout Error",
-                                "Not currently logged in.")
-            return
+    def logout_user(self, force_logout=False):
+        """
+        Comprehensive logout method with robust error handling and session cleanup.
+        
+        Args:
+            force_logout (bool): If True, force logout even if some cleanup steps fail
+        """
+        try:
+            # Log start of logout process
+            timestamp = self.assistant.get_current_time() if hasattr(self, 'assistant') else QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
+            
+            # Check if already logged out
+            if not self.assistant and not hasattr(self, 'session_manager'):
+                QMessageBox.information(self, "Logout", "You are already logged out.")
+                return
 
-        self.update_log(self.assistant.get_current_time(), 'Logging Out...')
-        
-        # Switch to YouTube downloader tab before logout
-        if hasattr(self, 'tab_widget'):
-            downloader_tab_index = self.tab_widget.indexOf(self.downloader_widget)
-            self.tab_widget.setCurrentIndex(downloader_tab_index)
-        
-        self.ui_components()
-        self.update_log(
-            self.assistant.get_current_time(),
-            'Logged Out Successfully.'
-        )
-        self.cleanup_on_exit()
-        self.modified = False
-        if self.btn_logout:
-            self.btn_logout.setVisible(False)
-        self.assistant.logout()
-        self.agent = None
-        
-        # Switch to YouTube downloader tab again to ensure it's visible
-        if hasattr(self, 'tab_widget') and hasattr(self, 'downloader_widget'):
-            downloader_tab_index = self.tab_widget.indexOf(self.downloader_widget)
-            self.tab_widget.setCurrentIndex(downloader_tab_index)       
+            # Confirm logout if not force logout
+            if not force_logout:
+                reply = QMessageBox.question(
+                    self, 
+                    "Confirm Logout", 
+                    "Are you sure you want to log out?", 
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                if reply != QMessageBox.Yes:
+                    return
+
+            # Log logout attempt
+            self.update_log(timestamp, 'Initiating Logout Process...')
+
+            # Stop any running timers
+            if hasattr(self, 'timer') and self.timer:
+                self.timer.stop()
+            if hasattr(self, 'status_timer') and self.status_timer:
+                self.status_timer.stop()
+
+            # Clear session manager
+            if hasattr(self, 'session_manager'):
+                try:
+                    self.session_manager.logout()
+                except Exception as e:
+                    self.logger.error(f"Error in session manager logout: {str(e)}")
+                    if not force_logout:
+                        raise
+
+            # Clear authentication services
+            services_to_clear = [
+                'assistant', 
+                'agent', 
+                'auth_service', 
+                'auth_manager'
+            ]
+            
+            for service in services_to_clear:
+                if hasattr(self, service):
+                    try:
+                        # If service has a logout method, call it
+                        if hasattr(getattr(self, service), 'logout'):
+                            getattr(self, service).logout()
+                        
+                        # Set to None
+                        setattr(self, service, None)
+                    except Exception as e:
+                        self.logger.error(f"Error clearing {service}: {str(e)}")
+                        if not force_logout:
+                            raise
+
+            # Reset UI components
+            try:
+                # Reset to initial state
+                self.ui_components()
+                
+                # Ensure YouTube downloader tab is visible
+                if hasattr(self, 'tab_widget') and hasattr(self, 'downloader_widget'):
+                    downloader_tab_index = self.tab_widget.indexOf(self.downloader_widget)
+                    self.tab_widget.setCurrentIndex(downloader_tab_index)
+            except Exception as e:
+                self.logger.error(f"Error resetting UI components: {str(e)}")
+                if not force_logout:
+                    raise
+
+            # Clear authentication-related environment variables
+            env_vars_to_clear = [
+                'AWS_ACCESS_KEY_ID', 
+                'AWS_SECRET_ACCESS_KEY', 
+                'AWS_SESSION_TOKEN'
+            ]
+            for var in env_vars_to_clear:
+                if var in os.environ:
+                    del os.environ[var]
+
+            # Log successful logout
+            self.update_log(timestamp, 'Logout Completed Successfully.')
+
+            # Reset modification flag
+            self.modified = False
+
+            # Remove logout and session buttons
+            if hasattr(self, 'btn_logout') and self.btn_logout:
+                self.btn_logout.setVisible(False)
+            if hasattr(self, 'btn_session_info') and self.btn_session_info:
+                self.btn_session_info.setVisible(False)
+
+            # Update session status display
+            if hasattr(self, 'session_timer_label'):
+                self.session_timer_label.setText("Not logged in")
+            if hasattr(self, 'session_type_label'):
+                self.session_type_label.setText("")
+
+            # Optional: Show a logout confirmation
+            QMessageBox.information(
+                self, 
+                "Logout Successful", 
+                "You have been logged out successfully.\n\n"
+                "Please log in again to access your data."
+            )
+
+        except Exception as e:
+            # Last resort error handling
+            error_msg = f"Logout failed: {str(e)}"
+            self.logger.critical(error_msg)
+            
+            # Force logout if not already forcing
+            if not force_logout:
+                QMessageBox.warning(
+                    self, 
+                    "Logout Error", 
+                    f"{error_msg}\n\nAttempting forced logout..."
+                )
+                # Recursive call with force_logout
+                self.logout_user(force_logout=True)
+            else:
+                QMessageBox.critical(
+                    self, 
+                    "Critical Logout Failure", 
+                    "Unable to complete logout. Please restart the application."
+                )
+         
     def set_button(self, btn_name, tooltip, shortcut, connect,
                    visible_true=False,
                    style="background-color: green; color: white;"):
@@ -1095,73 +1202,6 @@ class PIIWindow(QMainWindow):
         # self.password_input.setFocus()
         self.btn_connect_server.clicked.disconnect(self.show_password_input)
         self.btn_connect_server.clicked.connect(self.authenticate_and_connect)
-
-    # def direct_authenticate(self):
-    #     """Authenticate directly using password without attempting AWS SSO."""
-    #     username = os.environ.get('USER', 'admin')  # Default to 'admin' if USER not set
-    #     # password = # self.password_input.text()
-        
-    #     if not password:
-    #         QMessageBox.warning(
-    #             self,
-    #             "Authentication Error",
-    #             "Please enter a password."
-    #         )
-    #         return
-        
-    #     try:
-    #         # Import the authentication solution
-    #         from API.complete_auth_solution import AuthService
-            
-    #         # Initialize the auth service
-    #         self.auth_service = AuthService(CONSTANTS.API_BASE_URL)
-            
-    #         # Display authenticating message
-    #         if hasattr(self, 'btn_direct_login'):
-    #             self.btn_direct_login.setText('Authenticating...')
-    #             self.btn_direct_login.setDisabled(True)
-            
-    #         # Log the authentication attempt
-    #         logging.info(f"Attempting direct authentication for user: {username}")
-            
-    #         # Authenticate with the service
-    #         success, message = self.auth_service.authenticate(username, password)
-            
-    #         if not success:
-    #             QMessageBox.warning(
-    #                 self,
-    #                 "Authentication Failed",
-    #                 f"Error: {message}"
-    #             )
-    #             # self.password_input.clear()
-    #             if hasattr(self, 'btn_direct_login'):
-    #                 self.btn_direct_login.setText('Direct Login')
-    #                 self.btn_direct_login.setDisabled(False)
-    #             return
-            
-    #         # Authentication successful
-    #         # self.password_input.clear()
-            
-    #         # Create agent with session token
-    #         self.agent = Agent(
-    #             s3=CONSTANTS.AWS_S3,
-    #             file_name=CONSTANTS.AWS_FILE
-    #         )
-    #         self.assistant = Assistant(CONSTANTS.AWS_S3)
-            
-    #         # Complete connection process
-    #         self.connect_after_authentication()
-            
-    #     except Exception as e:
-    #         logging.error(f"Direct authentication error: {e}")
-    #         QMessageBox.critical(
-    #             self,
-    #             "Authentication Error",
-    #             f"An unexpected error occurred: {str(e)}"
-    #         )
-    #         if hasattr(self, 'btn_direct_login'):
-    #             self.btn_direct_login.setText('Direct Login')
-    #             self.btn_direct_login.setDisabled(False)
 
     def handle_data_response(self, response):
         """
@@ -1857,16 +1897,6 @@ class PIIWindow(QMainWindow):
 
     def authenticate_and_connect(self):
     #     """Authenticate user and connect to server with the reliable auth solution."""
-    #     # username = os.environ.get('USER', 'admin')  # Default to 'admin' if USER not set
-    #     # password = # self.password_input.text()
-        
-    #     if not password:
-    #         QMessageBox.warning(
-    #             self,
-    #             "Authentication Error",
-    #             "Please enter a password."
-    #         )
-    #         return
         
         self.btn_connect_server.setText('Authenticating...')
         
@@ -1876,23 +1906,6 @@ class PIIWindow(QMainWindow):
             
             # Initialize the auth service
             self.auth_service = AuthService(CONSTANTS.API_BASE_URL)
-            
-            # Authenticate with the service
-            # success, message = self.auth_service.authenticate(username, password)
-            
-            # if not success:
-            #     QMessageBox.warning(
-            #         self,
-            #         "Authentication Failed",
-            #         f"Error: {message}"
-            #     )
-            #     # self.password_input.clear()
-            #     self.btn_connect_server.setText('Connect to Server')
-            #     self.btn_connect_server.setDisabled(False)
-            #     return
-            
-            # Authentication successful
-            # self.password_input.clear()
             
             # Create agent with session token
             self.agent = Agent(
@@ -1904,29 +1917,7 @@ class PIIWindow(QMainWindow):
             # Complete connection process
             self.connect_after_authentication()
             
-        # except ImportError:
-        #     # Fall back to original authentication if the solution module is not available
-        #     logging.warning("New auth solution not available, falling back to original method")
-            
-        #     # Initialize auth manager if not already done
-        #     if not hasattr(self, 'auth_manager'):
-        #         from UI.Desktop.auth_manager import AuthenticationManager
-        #         self.auth_manager = AuthenticationManager(self)
-            
-        #     # Attempt standard authentication
-        #     if self.auth_manager.authenticate_with_password(username, password):
-        #         # Authentication successful
-        #         self.connect_to_server()
-        #         # self.password_input.clear()
-        #         self.update_log(
-        #             QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
-        #             f"Authentication successful for user: {self.auth_manager.user_id}"
-        #         )
-        #     else:
-        #         # Authentication failed
-        #         self.btn_connect_server.setText('Connect to Server')
-        #         self.btn_connect_server.setDisabled(False)
-        #         # self.password_input.clear()
+       
         except Exception as e:
             logging.error(f"Authentication error: {e}")
             QMessageBox.critical(
