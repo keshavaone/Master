@@ -2734,12 +2734,14 @@ class PIIWindow(QMainWindow):
             self.data_table.setItem(row, 0, QTableWidgetItem(item))
 
     def delete_item(self):
-        """Delete the selected item using the CRUD Helper."""
+        """Delete the selected item using the enhanced delete handler."""
+        # Check if table exists
         if not hasattr(self, 'table_widget') or not self.table_widget:
             QMessageBox.warning(self, "Delete Error",
                                 "Data table not available.")
             return
 
+        # Get selected items
         selected_items = self.table_widget.selectedItems()
         if not selected_items:
             QMessageBox.warning(self, "Delete Error",
@@ -2750,37 +2752,75 @@ class PIIWindow(QMainWindow):
         row = selected_items[0].row()
         delete_data = CRUDHelper.extract_row_data(self.table_widget, row)
 
-        # Log the delete attempt
-        self.update_log(
-            self.assistant.get_current_time(),
-            f"Attempting to delete item with ID: {delete_data.get('_id', 'unknown')}"
-        )
+        try:
+            # Import the DeleteHandler
+            from delete_handler import DeleteHandler
 
-        # Confirm deletion
-        if not self.confirm_delete(delete_data):
-            return
+            # Create a log callback function
+            def log_callback(message):
+                self.update_log(
+                    self.assistant.get_current_time() if hasattr(self, 'assistant') else
+                    QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
+                    message
+                )
 
-        # Use CRUD Helper to perform the operation
-        success, response = CRUDHelper.perform_operation(
-            'delete',
-            delete_data,
-            agent=self.agent if hasattr(self, 'agent') else None,
-            auth_service=self.auth_service if hasattr(
-                self, 'auth_service') else None,
-            auth_manager=self.auth_manager if hasattr(
-                self, 'auth_manager') else None,
-            logger=lambda msg: self.update_log(
-                self.assistant.get_current_time(), msg)
-        )
+            # Define success callback
+            def on_success():
+                self.table_widget.removeRow(row)
+                self.modified = True
 
-        if success:
-            QMessageBox.information(
-                self, "Deletion Complete", "Item deleted successfully!")
-            self.table_widget.removeRow(row)
-            self.modified = True
-        else:
-            QMessageBox.warning(self, "Delete Failed",
-                                f"Failed to delete item: {response}")
+            # Use the enhanced delete handler
+            DeleteHandler.delete_item(
+                parent=self,
+                item_data=delete_data,
+                agent=self.agent if hasattr(self, 'agent') else None,
+                auth_service=self.auth_service if hasattr(
+                    self, 'auth_service') else None,
+                auth_manager=self.auth_manager if hasattr(
+                    self, 'auth_manager') else None,
+                api_client=self.api_client if hasattr(
+                    self, 'api_client') else None,
+                on_success=on_success,
+                log_callback=log_callback
+            )
+        except ImportError:
+            # Fallback to using CRUDHelper if DeleteHandler is not available
+
+            # Log the delete attempt
+            self.update_log(
+                self.assistant.get_current_time() if hasattr(self, 'assistant') else
+                QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
+                f"Attempting to delete item with ID: {delete_data.get('_id', 'unknown')}"
+            )
+
+            # Confirm deletion
+            if not self.confirm_delete(delete_data):
+                return
+
+            # Use CRUD Helper to perform the operation
+            success, response = CRUDHelper.perform_operation(
+                'delete',
+                delete_data,
+                agent=self.agent if hasattr(self, 'agent') else None,
+                auth_service=self.auth_service if hasattr(
+                    self, 'auth_service') else None,
+                auth_manager=self.auth_manager if hasattr(
+                    self, 'auth_manager') else None,
+                logger=lambda msg: self.update_log(
+                    self.assistant.get_current_time() if hasattr(self, 'assistant') else
+                    QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
+                    msg
+                )
+            )
+
+            if success:
+                QMessageBox.information(
+                    self, "Deletion Complete", "Item deleted successfully!")
+                self.table_widget.removeRow(row)
+                self.modified = True
+            else:
+                QMessageBox.warning(self, "Delete Failed",
+                                    f"Failed to delete item: {response}")
 
     def get_item_info_from_selection(self, selected_items):
         """
