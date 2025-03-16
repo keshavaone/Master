@@ -45,55 +45,56 @@ handler = RotatingFileHandler(
     'application.log', maxBytes=1000000, backupCount=3)
 logging.basicConfig(handlers=[handler], level=logging.INFO)
 
+
 class CRUDHelper:
     """
     Helper class for consistent CRUD operations across the application.
-    
+
     This class provides utility functions for extracting data from UI elements
     and performing CRUD operations with proper validation and error handling.
     """
-    
+
     @staticmethod
     def extract_row_data(table_widget, row_index):
         """
         Extract all column data from a specific row in a table widget.
-        
+
         Args:
             table_widget (QTableWidget): The table widget
             row_index (int): The row index to extract data from
-            
+
         Returns:
             dict: A dictionary of column name: cell value pairs
         """
         row_data = {}
-        
+
         # Check all columns in this row
         for col in range(table_widget.columnCount()):
             header = table_widget.horizontalHeaderItem(col)
             if not header:
                 continue
-                
+
             column_name = header.text()
             cell_item = table_widget.item(row_index, col)
-            
+
             if not cell_item:
                 continue
-                
+
             # Store the cell value
             row_data[column_name] = cell_item.text()
-            
+
         return row_data
-    
+
     @staticmethod
     def validate_required_fields(data, required_fields, logger=None):
         """
         Validate that required fields exist in the data.
-        
+
         Args:
             data (dict): The data to validate
             required_fields (list): List of field names that must exist
             logger (callable, optional): Logging function
-            
+
         Returns:
             tuple: (is_valid, error_message)
         """
@@ -102,27 +103,28 @@ class CRUDHelper:
             if logger:
                 logger(error_msg)
             return False, error_msg
-            
-        missing_fields = [field for field in required_fields if field not in data or not data[field]]
-        
+
+        missing_fields = [
+            field for field in required_fields if field not in data or not data[field]]
+
         if missing_fields:
             error_msg = f"Missing required fields: {', '.join(missing_fields)}"
             if logger:
                 logger(error_msg)
             return False, error_msg
-            
+
         return True, ""
-    
+
     @staticmethod
     def perform_operation(operation, data, agent=None, auth_service=None, auth_manager=None, logger=None):
         """
         Perform a CRUD operation using available services.
-        
+
         This method tries different services in order of preference:
         1. Direct agent (if available)
         2. auth_service (if available)
         3. auth_manager (if available)
-        
+
         Args:
             operation (str): The operation to perform ('create', 'read', 'update', 'delete')
             data (dict): The data to use for the operation
@@ -130,25 +132,26 @@ class CRUDHelper:
             auth_service (object, optional): Authentication service
             auth_manager (object, optional): Authentication manager
             logger (callable, optional): Logging function
-            
+
         Returns:
             tuple: (success, result_or_error_message)
         """
         if logger:
             logger(f"Performing {operation} operation")
-            
+
         # Validate _id for update and delete operations
         if operation in ('update', 'delete'):
-            valid, error_msg = CRUDHelper.validate_required_fields(data, ['_id'], logger)
+            valid, error_msg = CRUDHelper.validate_required_fields(data, [
+                                                                   '_id'], logger)
             if not valid:
                 return False, error_msg
-        
+
         # Try agent first (most direct)
         if agent:
             try:
                 if logger:
                     logger(f"Using agent.{operation}_one_data directly")
-                    
+
                 # Call the appropriate method based on operation
                 if operation == 'create':
                     response = agent.insert_new_data(data)
@@ -160,7 +163,7 @@ class CRUDHelper:
                     response = agent.delete_one_data(data)
                 else:
                     return False, f"Unknown operation: {operation}"
-                    
+
                 # Handle response
                 if response is True or (isinstance(response, dict) and 'error' not in response):
                     if logger:
@@ -178,13 +181,13 @@ class CRUDHelper:
                 if logger:
                     logger(f"Agent {operation} error: {str(e)}")
                 # Continue to next method
-        
+
         # Try auth_service next
         if auth_service:
             try:
                 if logger:
                     logger(f"Using auth_service for {operation} request")
-                    
+
                 # Map operation to HTTP method
                 method_map = {
                     'create': 'POST',
@@ -192,23 +195,24 @@ class CRUDHelper:
                     'update': 'PATCH',
                     'delete': 'DELETE'
                 }
-                
+
                 # Make authenticated request
                 success, response_data = auth_service.make_authenticated_request(
                     method=method_map[operation],
                     endpoint="pii",
                     data=data if operation != 'read' else None
                 )
-                
+
                 if success:
                     if logger:
                         logger(f"Auth service {operation} successful")
                     return True, response_data
                 else:
-                    error_msg = response_data.get('error', str(response_data)) if isinstance(response_data, dict) else str(response_data)
+                    error_msg = response_data.get('error', str(response_data)) if isinstance(
+                        response_data, dict) else str(response_data)
                     if logger:
                         logger(f"Auth service {operation} failed: {error_msg}")
-                    
+
                     # Only continue if we have auth_manager
                     if auth_manager:
                         # Continue to next method
@@ -221,13 +225,13 @@ class CRUDHelper:
                 # Continue to next method if we have auth_manager
                 if not auth_manager:
                     return False, str(e)
-        
+
         # Try auth_manager as last authenticated option
         if auth_manager and auth_manager.token:
             try:
                 if logger:
                     logger(f"Using auth_manager for {operation} request")
-                    
+
                 # Map operation to HTTP method
                 method_map = {
                     'create': 'POST',
@@ -235,20 +239,21 @@ class CRUDHelper:
                     'update': 'PATCH',
                     'delete': 'DELETE'
                 }
-                
+
                 # Make authenticated request
                 success, response_data = auth_manager.make_authenticated_request(
                     method=method_map[operation],
                     endpoint="pii",
                     data=data if operation != 'read' else None
                 )
-                
+
                 if success:
                     if logger:
                         logger(f"Auth manager {operation} successful")
                     return True, response_data
                 else:
-                    error_msg = response_data.get('error', str(response_data)) if isinstance(response_data, dict) else str(response_data)
+                    error_msg = response_data.get('error', str(response_data)) if isinstance(
+                        response_data, dict) else str(response_data)
                     if logger:
                         logger(f"Auth manager {operation} failed: {error_msg}")
                     return False, error_msg
@@ -256,7 +261,7 @@ class CRUDHelper:
                 if logger:
                     logger(f"Auth manager {operation} error: {str(e)}")
                 return False, str(e)
-        
+
         # If we get here, all methods failed or weren't available
         return False, "No suitable authentication method available"
 
@@ -298,7 +303,7 @@ class PIIWindow(QMainWindow):
         self.time_update_start_time = None
         self.timer = None
         self.start_time = None
-        
+
         # Initialize logger
         self.logger = logging.getLogger('PIIWindow')
         handler = logging.StreamHandler()
@@ -307,11 +312,11 @@ class PIIWindow(QMainWindow):
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
         self.logger.setLevel(logging.INFO)
-        
+
         # Initialize session manager and status bar
         self.setup_session_manager()
         self.setup_status_bar()
-            
+
         # Set up UI
         self.ui_components()
         self.show()
@@ -319,7 +324,7 @@ class PIIWindow(QMainWindow):
 
         # Connect the close event to the cleanup function
         self.close_event = self.cleanup_on_exit
-    
+
     def add_new_entry(self):
         """Show dialog to add a new entry."""
         # Create empty item template
@@ -328,62 +333,66 @@ class PIIWindow(QMainWindow):
             "Type": "",
             "PII": str([{"Item Name": "", "Data": ""}])
         }
-        
+
         # Create and show the edit dialog
         dialog = DataItemEditDialog(new_item, self)
-        
+
         if dialog.exec_() == QDialog.Accepted:
             # Get the new item data
             item_data = dialog.get_updated_data()
-            
+
             if item_data:
                 # Remove ID field for new items
                 if "_id" in item_data:
                     del item_data["_id"]
-                
+
                 # Use CRUDHelper to create the item
                 success, response = CRUDHelper.perform_operation(
-                    'create', 
+                    'create',
                     item_data,
                     agent=self.agent if hasattr(self, 'agent') else None,
-                    auth_service=self.auth_service if hasattr(self, 'auth_service') else None,
+                    auth_service=self.auth_service if hasattr(
+                        self, 'auth_service') else None,
                     logger=lambda msg: self.update_log(
-                        self.assistant.get_current_time() if hasattr(self, 'assistant') else 
+                        self.assistant.get_current_time() if hasattr(self, 'assistant') else
                         QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
                         msg
                     )
                 )
-                
+
                 if success:
-                    QMessageBox.information(self, "Success", "Item added successfully")
-                    
+                    QMessageBox.information(
+                        self, "Success", "Item added successfully")
+
                     # Refresh data display if needed
                     if hasattr(self, 'data_table'):
                         self.populate_data_table(self.process_request())
                 else:
-                    QMessageBox.warning(self, "Error", f"Failed to add item: {response}")
-                
+                    QMessageBox.warning(
+                        self, "Error", f"Failed to add item: {response}")
+
     def ui_components(self):
         """Initialize and set up the UI components."""
-        
+
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        
+
         # Create main layout
         main_layout = QVBoxLayout(central_widget)
-        
+
         # Create tab widget for multiple tabs
         self.tab_widget = QTabWidget()
         main_layout.addWidget(self.tab_widget)
-        
+
         # Create PII Data tab widget and layout
         self.pii_tab = QWidget()
         pii_layout = QVBoxLayout(self.pii_tab)
-        
+
         if hasattr(self, 'session_manager'):
-            self.session_status = SessionStatusWidget(self, self.session_manager)
+            self.session_status = SessionStatusWidget(
+                self, self.session_manager)
             pii_layout.addWidget(self.session_status, alignment=Qt.AlignCenter)
-        
+
         # Welcome text
         self.welcome_text = QLabel(
             f"Welcome to GUARD: {os.environ.get('USER', 'USER').upper()}",
@@ -470,30 +479,30 @@ class PIIWindow(QMainWindow):
         self.btn_session_info.setToolTip('View current session information')
         self.btn_session_info.setVisible(False)
         button_layout.addWidget(self.btn_session_info)
-        
+
         button_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         pii_layout.addLayout(button_layout)
-        
+
         # Add the PII tab to tab widget
         self.tab_widget.addTab(self.pii_tab, "PII Data Management")
-        
+
         # Create and add YouTube Downloader tab
         if not hasattr(self, 'downloader_widget'):
             self.downloader_widget = YouTubeDownloaderWidget(
                 parent=self,
                 log_callback=lambda msg: self.update_log(
-                    self.assistant.get_current_time() if hasattr(self, 'assistant') and self.assistant is not None else 
+                    self.assistant.get_current_time() if hasattr(self, 'assistant') and self.assistant is not None else
                     QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
                     f"YouTube Downloader: {msg}"
                 ) if hasattr(self, 'update_log') else None
             )
-        
+
         # Add YouTube downloader tab
         self.tab_widget.addTab(self.downloader_widget, "YouTube Downloader")
-        
+
         # Set YouTube downloader as the default tab
         self.tab_widget.setCurrentIndex(1)
-        
+
         # Log the initialization of the YouTube downloader
         QTimer.singleShot(500, lambda: self.log_youtube_init())
 
@@ -502,33 +511,36 @@ class PIIWindow(QMainWindow):
         try:
             if hasattr(self, 'update_log'):
                 timestamp = self.assistant.get_current_time() if hasattr(self, 'assistant') and self.assistant is not None else \
-                        QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
-                self.update_log(timestamp, "YouTube Downloader component initialized")
+                    QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
+                self.update_log(
+                    timestamp, "YouTube Downloader component initialized")
         except Exception as e:
             print(f"Error logging YouTube init: {e}")
 
     def logout_user(self, force_logout=False):
         """
         Comprehensive logout method with robust error handling and session cleanup.
-        
+
         Args:
             force_logout (bool): If True, force logout even if some cleanup steps fail
         """
         try:
             # Log start of logout process
-            timestamp = self.assistant.get_current_time() if hasattr(self, 'assistant') else QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
-            
+            timestamp = self.assistant.get_current_time() if hasattr(
+                self, 'assistant') else QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
+
             # Check if already logged out
             if not self.assistant and not hasattr(self, 'session_manager'):
-                QMessageBox.information(self, "Logout", "You are already logged out.")
+                QMessageBox.information(
+                    self, "Logout", "You are already logged out.")
                 return
 
             # Confirm logout if not force logout
             if not force_logout:
                 reply = QMessageBox.question(
-                    self, 
-                    "Confirm Logout", 
-                    "Are you sure you want to log out?", 
+                    self,
+                    "Confirm Logout",
+                    "Are you sure you want to log out?",
                     QMessageBox.Yes | QMessageBox.No
                 )
                 if reply != QMessageBox.Yes:
@@ -548,29 +560,31 @@ class PIIWindow(QMainWindow):
                 try:
                     self.session_manager.logout()
                 except Exception as e:
-                    self.logger.error(f"Error in session manager logout: {str(e)}")
+                    self.logger.error(
+                        f"Error in session manager logout: {str(e)}")
                     if not force_logout:
                         raise
 
             # Clear authentication services
             services_to_clear = [
-                'assistant', 
-                'agent', 
-                'auth_service', 
+                'assistant',
+                'agent',
+                'auth_service',
                 'auth_manager'
             ]
-            
+
             for service in services_to_clear:
                 if hasattr(self, service):
                     try:
                         # If service has a logout method, call it
                         if hasattr(getattr(self, service), 'logout'):
                             getattr(self, service).logout()
-                        
+
                         # Set to None
                         setattr(self, service, None)
                     except Exception as e:
-                        self.logger.error(f"Error clearing {service}: {str(e)}")
+                        self.logger.error(
+                            f"Error clearing {service}: {str(e)}")
                         if not force_logout:
                             raise
 
@@ -578,10 +592,11 @@ class PIIWindow(QMainWindow):
             try:
                 # Reset to initial state
                 self.ui_components()
-                
+
                 # Ensure YouTube downloader tab is visible
                 if hasattr(self, 'tab_widget') and hasattr(self, 'downloader_widget'):
-                    downloader_tab_index = self.tab_widget.indexOf(self.downloader_widget)
+                    downloader_tab_index = self.tab_widget.indexOf(
+                        self.downloader_widget)
                     self.tab_widget.setCurrentIndex(downloader_tab_index)
             except Exception as e:
                 self.logger.error(f"Error resetting UI components: {str(e)}")
@@ -590,8 +605,8 @@ class PIIWindow(QMainWindow):
 
             # Clear authentication-related environment variables
             env_vars_to_clear = [
-                'AWS_ACCESS_KEY_ID', 
-                'AWS_SECRET_ACCESS_KEY', 
+                'AWS_ACCESS_KEY_ID',
+                'AWS_SECRET_ACCESS_KEY',
                 'AWS_SESSION_TOKEN'
             ]
             for var in env_vars_to_clear:
@@ -618,8 +633,8 @@ class PIIWindow(QMainWindow):
 
             # Optional: Show a logout confirmation
             QMessageBox.information(
-                self, 
-                "Logout Successful", 
+                self,
+                "Logout Successful",
                 "You have been logged out successfully.\n\n"
                 "Please log in again to access your data."
             )
@@ -628,23 +643,23 @@ class PIIWindow(QMainWindow):
             # Last resort error handling
             error_msg = f"Logout failed: {str(e)}"
             self.logger.critical(error_msg)
-            
+
             # Force logout if not already forcing
             if not force_logout:
                 QMessageBox.warning(
-                    self, 
-                    "Logout Error", 
+                    self,
+                    "Logout Error",
                     f"{error_msg}\n\nAttempting forced logout..."
                 )
                 # Recursive call with force_logout
                 self.logout_user(force_logout=True)
             else:
                 QMessageBox.critical(
-                    self, 
-                    "Critical Logout Failure", 
+                    self,
+                    "Critical Logout Failure",
                     "Unable to complete logout. Please restart the application."
                 )
-         
+
     def set_button(self, btn_name, tooltip, shortcut, connect,
                    visible_true=False,
                    style="background-color: green; color: white;"):
@@ -854,20 +869,20 @@ class PIIWindow(QMainWindow):
                     QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
                     "Using auth_service for API request"
                 )
-                
+
                 # Import the APIClient if not already available
                 from UI.Desktop.api_client import APIClient
-                
+
                 # Create API client if it doesn't exist
                 if not hasattr(self, 'api_client'):
                     self.api_client = APIClient(
                         base_url=CONSTANTS.API_BASE_URL,
                         auth_service=self.auth_service
                     )
-                
+
                 # Use synchronous method to fetch data
                 success, data = self.api_client.sync_get_pii_data()
-                
+
                 if not success:
                     # Handle different error response formats
                     if isinstance(data, dict) and 'error' in data:
@@ -877,10 +892,11 @@ class PIIWindow(QMainWindow):
                         error_msg = data
                     else:
                         error_msg = str(data)
-                        
-                    QMessageBox.warning(self, "Error", f"Failed to fetch data: {error_msg}")
+
+                    QMessageBox.warning(
+                        self, "Error", f"Failed to fetch data: {error_msg}")
                     return None
-                
+
                 # Handle different successful response formats
                 if isinstance(data, list):
                     return pd.DataFrame(data)
@@ -900,18 +916,18 @@ class PIIWindow(QMainWindow):
                             return pd.DataFrame([parsed_data])
                     except json.JSONDecodeError:
                         # If not valid JSON, display in a single row dataframe
-                        QMessageBox.warning(self, "Data Format Warning", 
-                            "Received unexpected string response from server. Displaying as raw data.")
+                        QMessageBox.warning(self, "Data Format Warning",
+                                            "Received unexpected string response from server. Displaying as raw data.")
                         return pd.DataFrame([{"Raw Response": data}])
                 else:
                     # For any other type, convert to DataFrame if possible
                     try:
                         return pd.DataFrame(data)
                     except:
-                        QMessageBox.warning(self, "Data Format Error", 
-                            f"Received unexpected data type: {type(data)}. Cannot display.")
+                        QMessageBox.warning(self, "Data Format Error",
+                                            f"Received unexpected data type: {type(data)}. Cannot display.")
                         return None
-                    
+
             # Fall back to auth_manager
             elif hasattr(self, 'auth_manager') and self.auth_manager.token:
                 self.update_log(
@@ -919,13 +935,13 @@ class PIIWindow(QMainWindow):
                     QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
                     "Using auth_manager for API request"
                 )
-                
+
                 # Make authenticated request
                 success, data = self.auth_manager.make_authenticated_request(
                     method="GET",
                     endpoint="pii"
                 )
-                
+
                 if not success:
                     if isinstance(data, dict) and 'error' in data:
                         error_msg = data['error']
@@ -933,9 +949,10 @@ class PIIWindow(QMainWindow):
                         error_msg = data
                     else:
                         error_msg = str(data)
-                    QMessageBox.warning(self, "Error", f"Failed to fetch data: {error_msg}")
+                    QMessageBox.warning(
+                        self, "Error", f"Failed to fetch data: {error_msg}")
                     return None
-                    
+
                 # Handle different response formats
                 if isinstance(data, list):
                     return pd.DataFrame(data)
@@ -954,10 +971,10 @@ class PIIWindow(QMainWindow):
                     try:
                         return pd.DataFrame(data)
                     except:
-                        QMessageBox.warning(self, "Data Format Error", 
-                            f"Received unexpected data type: {type(data)}. Cannot display.")
+                        QMessageBox.warning(self, "Data Format Error",
+                                            f"Received unexpected data type: {type(data)}. Cannot display.")
                         return None
-                    
+
             # Last resort: try to get data directly from agent
             elif hasattr(self, 'agent') and self.agent:
                 self.update_log(
@@ -965,9 +982,9 @@ class PIIWindow(QMainWindow):
                     QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
                     "Getting data directly from agent"
                 )
-                
+
                 data = self.agent.get_all_data()
-                
+
                 # Convert to DataFrame if needed
                 if isinstance(data, list):
                     return pd.DataFrame(data)
@@ -986,21 +1003,23 @@ class PIIWindow(QMainWindow):
                     try:
                         return pd.DataFrame(data)
                     except:
-                        QMessageBox.warning(self, "Data Format Error", 
-                            f"Received unexpected data type: {type(data)}. Cannot display.")
+                        QMessageBox.warning(self, "Data Format Error",
+                                            f"Received unexpected data type: {type(data)}. Cannot display.")
                         return None
-                    
+
             else:
-                QMessageBox.warning(self, "Error", "Not authenticated. Please connect first.")
+                QMessageBox.warning(
+                    self, "Error", "Not authenticated. Please connect first.")
                 return None
-                    
+
         except Exception as e:
             self.update_log(
                 self.assistant.get_current_time() if hasattr(self, 'assistant') else
                 QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
                 f"Error fetching data: {str(e)}"
             )
-            QMessageBox.warning(self, "Error", f"Failed to fetch data: {str(e)}")
+            QMessageBox.warning(
+                self, "Error", f"Failed to fetch data: {str(e)}")
             return None
 
     def insert_to_db(self, dialog, category, type_, pii):
@@ -1021,19 +1040,19 @@ class PIIWindow(QMainWindow):
                     "Not authenticated. Please connect to the server first."
                 )
                 return
-                
+
             new_entry = {
                 "Category": category,
                 "Type": type_,
                 "PII": str(pii)
             }
-            
+
             success, response = self.auth_service.make_authenticated_request(
                 method="POST",
                 endpoint="pii",
                 data=new_entry
             )
-            
+
             if success:
                 QMessageBox.information(
                     self,
@@ -1073,7 +1092,7 @@ class PIIWindow(QMainWindow):
             "Guard Data Download Attempted"
         )
         pre_download_time_stamp = time.time()
-        
+
         # Try to download using authenticated methods first
         try:
             # Try auth_service first
@@ -1082,13 +1101,13 @@ class PIIWindow(QMainWindow):
                     self.assistant.get_current_time(),
                     "Downloading data using auth_service"
                 )
-                
+
                 # Trigger Excel download via API endpoint
                 success, result = self.auth_service.make_authenticated_request(
                     method="GET",
                     endpoint="pii/download"  # Assuming you have a download endpoint
                 )
-                
+
                 if success:
                     # Handle successful download
                     download_time = time.time() - pre_download_time_stamp
@@ -1118,7 +1137,7 @@ class PIIWindow(QMainWindow):
                 self.assistant.get_current_time(),
                 f"Auth service download error: {str(e)}, falling back to agent method"
             )
-        
+
         # If we get here, try the agent's native download method
         try:
             response = self.agent.download_excel()
@@ -1167,10 +1186,10 @@ class PIIWindow(QMainWindow):
             "background-color: gray; color: white;"
         )
         # self.password_input.setHidden(False)  # Make password input visible
-        
+
         # Create login options layout
         login_options_layout = QHBoxLayout()
-        
+
         # SSO Login button
         self.btn_sso_login = QPushButton('AWS SSO Login', self)
         self.btn_sso_login.setCursor(QCursor(Qt.PointingHandCursor))
@@ -1179,7 +1198,7 @@ class PIIWindow(QMainWindow):
         )
         self.btn_sso_login.clicked.connect(self.authenticate_with_sso)
         login_options_layout.addWidget(self.btn_sso_login)
-        
+
         # Direct Login button
         self.btn_direct_login = QPushButton('Direct Login', self)
         self.btn_direct_login.setCursor(QCursor(Qt.PointingHandCursor))
@@ -1188,17 +1207,17 @@ class PIIWindow(QMainWindow):
         )
         self.btn_direct_login.clicked.connect(self.direct_authenticate)
         login_options_layout.addWidget(self.btn_direct_login)
-        
+
         # Add login options to layout
         if hasattr(self, 'login_options_container'):
             # Remove old container if it exists
             self.login_options_container.setParent(None)
             self.login_options_container.deleteLater()
-        
+
         self.login_options_container = QWidget(self)
         self.login_options_container.setLayout(login_options_layout)
         self.centralWidget().layout().addWidget(self.login_options_container)
-        
+
         # self.password_input.setFocus()
         self.btn_connect_server.clicked.disconnect(self.show_password_input)
         self.btn_connect_server.clicked.connect(self.authenticate_and_connect)
@@ -1286,26 +1305,26 @@ class PIIWindow(QMainWindow):
     def fetch_latest_data(self):
         """Fetch the latest data and update the dialog."""
         try:
-            # Get fresh data 
+            # Get fresh data
             data = self.process_request()
-            
+
             # Find any open ModernDataDialog instances and update them
             for dialog in self.findChildren(ModernDataDialog):
                 dialog.set_data(data)
-                
+
             # Log the refresh
             self.update_log(
-                self.assistant.get_current_time() if hasattr(self, 'assistant') else 
+                self.assistant.get_current_time() if hasattr(self, 'assistant') else
                 QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
                 "Data refreshed successfully"
             )
         except Exception as e:
             self.update_log(
-                self.assistant.get_current_time() if hasattr(self, 'assistant') else 
+                self.assistant.get_current_time() if hasattr(self, 'assistant') else
                 QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
                 f"Error refreshing data: {str(e)}"
             )
-        
+
     def enhanced_show_data_window(self):
         """Show enhanced data dialog with CRUD capabilities and error handling."""
         if not hasattr(self, 'assistant') or not self.assistant:
@@ -1315,116 +1334,124 @@ class PIIWindow(QMainWindow):
         try:
             # Log the operation
             self.update_log(
-                self.assistant.get_current_time() if hasattr(self, 'assistant') else 
+                self.assistant.get_current_time() if hasattr(self, 'assistant') else
                 QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
                 "Opening data display window"
             )
-            
+
             # Check if we have an API client, create one if not
             if not hasattr(self, 'api_client') or self.api_client is None:
                 from UI.Desktop.api_client import APIClient
                 self.api_client = APIClient(
                     base_url=CONSTANTS.API_BASE_URL,
-                    auth_service=self.auth_service if hasattr(self, 'auth_service') else None
+                    auth_service=self.auth_service if hasattr(
+                        self, 'auth_service') else None
                 )
-                
+
                 # Log client creation
                 self.update_log(
-                    self.assistant.get_current_time() if hasattr(self, 'assistant') else 
+                    self.assistant.get_current_time() if hasattr(self, 'assistant') else
                     QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
                     "Created API client for data operations"
                 )
-            
+
             # Fetch data first to check if we can connect
             self.update_log(
-                self.assistant.get_current_time() if hasattr(self, 'assistant') else 
+                self.assistant.get_current_time() if hasattr(self, 'assistant') else
                 QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
                 "Pre-fetching data to verify connection"
             )
-            
+
             try:
                 # Use QProgressDialog instead for better control
-                progress = QProgressDialog("Connecting to server and fetching data...", "Cancel", 0, 100, self)
+                progress = QProgressDialog(
+                    "Connecting to server and fetching data...", "Cancel", 0, 100, self)
                 progress.setWindowTitle("Fetching Data")
                 progress.setWindowModality(Qt.WindowModal)
                 progress.setMinimumDuration(0)  # Show immediately
                 progress.setValue(10)
                 progress.show()
                 QApplication.processEvents()  # Keep UI responsive
-                
+
                 # Attempt to get data
                 progress.setValue(30)
                 QApplication.processEvents()
                 success, data = self.api_client.sync_get_pii_data()
-                
+
                 # Ensure progress dialog is closed
                 progress.setValue(100)
                 progress.close()
                 progress = None  # Explicitly release the reference
-                
+
                 if not success:
-                    error_msg = data.get('error', str(data)) if isinstance(data, dict) else str(data)
+                    error_msg = data.get('error', str(data)) if isinstance(
+                        data, dict) else str(data)
                     raise ValueError(f"Failed to fetch data: {error_msg}")
-                
+
             except Exception as e:
                 self.update_log(
-                    self.assistant.get_current_time() if hasattr(self, 'assistant') else 
+                    self.assistant.get_current_time() if hasattr(self, 'assistant') else
                     QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
                     f"Error fetching data: {str(e)}"
                 )
-                
+
                 # Try direct agent access as fallback
                 if hasattr(self, 'agent') and self.agent:
                     self.update_log(
-                        self.assistant.get_current_time() if hasattr(self, 'assistant') else 
+                        self.assistant.get_current_time() if hasattr(self, 'assistant') else
                         QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
                         "Falling back to direct agent access"
                     )
                     data = self.agent.get_all_data()
                     if not data:
-                        raise ValueError("Could not fetch data from any source")
+                        raise ValueError(
+                            "Could not fetch data from any source")
                 else:
-                    QMessageBox.critical(self, "Connection Error", f"Failed to fetch data: {str(e)}")
+                    QMessageBox.critical(
+                        self, "Connection Error", f"Failed to fetch data: {str(e)}")
                     return
-            
+
             # Create and show the enhanced data dialog
             try:
                 # Try to import the enhanced dialog
                 from UI.Desktop.enhanced_data_dialog import EnhancedDataDialog
-                
+
                 data_dialog = EnhancedDataDialog(
                     self,
                     api_client=self.api_client,
-                    auth_service=self.auth_service if hasattr(self, 'auth_service') else None,
+                    auth_service=self.auth_service if hasattr(
+                        self, 'auth_service') else None,
                     agent=self.agent if hasattr(self, 'agent') else None
                 )
-                
+
                 # Connect download button to download function
                 data_dialog.download_btn.clicked.connect(self.download_pii)
-                
+
                 # Show the dialog
                 data_dialog.exec_()
-                
+
             except ImportError:
                 # Fall back to modern_components dialog if enhanced dialog is not available
                 self.update_log(
-                    self.assistant.get_current_time() if hasattr(self, 'assistant') else 
+                    self.assistant.get_current_time() if hasattr(self, 'assistant') else
                     QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
                     "Enhanced dialog not available, using ModernDataDialog instead"
                 )
-                
+
                 from UI.Desktop.modern_components import ModernDataDialog, CRUDHelper
-                
+
                 # Create and show the modern data dialog
-                data_dialog = ModernDataDialog(self, "Your Guard Data", self.fetch_latest_data)
-                
+                data_dialog = ModernDataDialog(
+                    self, "Your Guard Data", self.fetch_latest_data)
+
                 # Set the CRUD helper and services
                 data_dialog.set_crud_helper(
                     CRUDHelper,  # The helper class itself
-                    auth_service=self.auth_service if hasattr(self, 'auth_service') else None,
+                    auth_service=self.auth_service if hasattr(
+                        self, 'auth_service') else None,
                     agent=self.agent if hasattr(self, 'agent') else None
                 )
-                
+
                 # Set the data (convert to list if needed)
                 if isinstance(data, pd.DataFrame):
                     data_list = data.to_dict(orient='records')
@@ -1436,37 +1463,38 @@ class PIIWindow(QMainWindow):
                         data_list = [data]
                 else:
                     data_list = data
-                    
+
                 data_dialog.set_data(data_list)
-                
+
                 # Connect download button to download function
                 data_dialog.download_btn.clicked.connect(self.download_pii)
-                
+
                 # Show the dialog
                 data_dialog.exec_()
-                
+
         except Exception as e:
             self.update_log(
-                self.assistant.get_current_time() if hasattr(self, 'assistant') else 
+                self.assistant.get_current_time() if hasattr(self, 'assistant') else
                 QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
                 f'Error displaying data: {str(e)}'
             )
-            
+
             # Show detailed error message
             import traceback
             error_details = traceback.format_exc()
             self.update_log(
-                self.assistant.get_current_time() if hasattr(self, 'assistant') else 
+                self.assistant.get_current_time() if hasattr(self, 'assistant') else
                 QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
                 f'Error details: {error_details}'
             )
-            
+
             QMessageBox.critical(
                 self,
                 "Error",
                 f"An unexpected error occurred when trying to display data:\n\n{str(e)}\n\n"
                 f"Please check the application logs for more details."
             )
+
     def open_context_menu(self, position):
         """
         Show context menu for table items.
@@ -1478,7 +1506,7 @@ class PIIWindow(QMainWindow):
             # Check if there are selected items
             if not self.table_widget.selectedItems():
                 return
-                
+
             # Create context menu
             menu = QMenu()
 
@@ -1499,7 +1527,7 @@ class PIIWindow(QMainWindow):
 
             # Show the menu at the cursor position
             menu.exec_(self.table_widget.viewport().mapToGlobal(position))
-            
+
         except Exception as e:
             self.update_log(
                 self.assistant.get_current_time(),
@@ -1521,7 +1549,7 @@ class PIIWindow(QMainWindow):
             self.assistant.get_current_time(),
             f"Editing row {row}"
         )
-        
+
         # Verify row has an _id field
         id_col = -1
         for col in range(self.table_widget.columnCount()):
@@ -1529,7 +1557,7 @@ class PIIWindow(QMainWindow):
             if header and header.text() == '_id':
                 id_col = col
                 break
-        
+
         if id_col >= 0:
             id_item = self.table_widget.item(row, id_col)
             if id_item is None or not id_item.text():
@@ -1543,7 +1571,7 @@ class PIIWindow(QMainWindow):
                     "Cannot edit this row because it has no ID value"
                 )
                 return
-                
+
             self.update_log(
                 self.assistant.get_current_time(),
                 f"Row has ID: {id_item.text()}"
@@ -1562,7 +1590,7 @@ class PIIWindow(QMainWindow):
                 pii_col = col
                 item = self.table_widget.item(row, col)
                 break
-        
+
         if pii_col == -1 or item is None:
             self.update_log(
                 self.assistant.get_current_time(),
@@ -1687,42 +1715,42 @@ class PIIWindow(QMainWindow):
             # Extract data from selected row
             row = selected_items[0].row()
             update_data = {}
-            
+
             # First, get all values from the row
             for col in range(self.table_widget.columnCount()):
                 header = self.table_widget.horizontalHeaderItem(col)
                 if not header:
                     continue
-                    
+
                 column_name = header.text()
                 cell_item = self.table_widget.item(row, col)
-                
+
                 if not cell_item:
                     self.update_log(
                         self.assistant.get_current_time(),
                         f"Warning: Cell for column '{column_name}' is empty"
                     )
                     continue
-                    
+
                 # Store the cell value in our update data
                 update_data[column_name] = cell_item.text()
-            
+
             # Validate _id field - this is critical
             if '_id' not in update_data or not update_data['_id']:
                 self.update_log(
-                    self.assistant.get_current_time(), 
+                    self.assistant.get_current_time(),
                     "Error: No _id found in selected row"
                 )
                 QMessageBox.warning(
-                    self, 
-                    "Update Error", 
+                    self,
+                    "Update Error",
                     "Cannot update this record: No ID value found"
                 )
                 return
 
             # Set updated PII value
             update_data["PII"] = final_value.replace('"', "'")
-            
+
             # Log the update data we're going to send
             self.update_log(
                 self.assistant.get_current_time(),
@@ -1732,7 +1760,7 @@ class PIIWindow(QMainWindow):
                 self.assistant.get_current_time(),
                 f"Update data includes fields: {', '.join(update_data.keys())}"
             )
-            
+
             # Set timer for measuring update time
             self.time_update_start_time = time.time()
 
@@ -1743,7 +1771,7 @@ class PIIWindow(QMainWindow):
                         self.assistant.get_current_time(),
                         "Using agent.update_one_data directly"
                     )
-                    
+
                     # Create a minimal update payload with just the necessary fields
                     minimal_update = {
                         '_id': update_data['_id'],
@@ -1751,15 +1779,15 @@ class PIIWindow(QMainWindow):
                         'Type': update_data.get('Type', ''),
                         'PII': update_data['PII']
                     }
-                    
+
                     # Log what we're sending to update_one_data
                     self.update_log(
                         self.assistant.get_current_time(),
                         f"Using minimal update data: {minimal_update}"
                     )
-                    
+
                     response = self.agent.update_one_data(minimal_update)
-                    
+
                     update_time = time.time() - self.time_update_start_time
                     self.update_log(
                         self.assistant.get_current_time(),
@@ -1782,21 +1810,21 @@ class PIIWindow(QMainWindow):
                         self.assistant.get_current_time(),
                         f"Agent update_one_data error: {str(e)}"
                     )
-            
+
             # Fall back to auth_service if agent direct update failed
             if hasattr(self, 'auth_service'):
                 self.update_log(
                     self.assistant.get_current_time(),
                     "Using auth_service for update request"
                 )
-                
+
                 # Make authenticated request with all fields in update_data
                 success, response_data = self.auth_service.make_authenticated_request(
                     method="PATCH",
                     endpoint="pii",
                     data=update_data
                 )
-                
+
                 if success:
                     update_time = time.time() - self.time_update_start_time
                     self.update_log(
@@ -1816,12 +1844,13 @@ class PIIWindow(QMainWindow):
                     return
                 else:
                     # Log the error but continue to try other methods
-                    error_msg = response_data.get('error', str(response_data)) if isinstance(response_data, dict) else str(response_data)
+                    error_msg = response_data.get('error', str(response_data)) if isinstance(
+                        response_data, dict) else str(response_data)
                     self.update_log(
                         self.assistant.get_current_time(),
                         f"Auth service update failed: {error_msg}"
                     )
-                    
+
                     # Show error if this was our last resort
                     if not hasattr(self, 'auth_manager') or not self.auth_manager.token:
                         QMessageBox.warning(
@@ -1830,21 +1859,21 @@ class PIIWindow(QMainWindow):
                             f"Failed to update data: {error_msg}"
                         )
                         return
-            
+
             # Fall back to auth_manager if other methods failed
             if hasattr(self, 'auth_manager') and self.auth_manager.token:
                 self.update_log(
                     self.assistant.get_current_time(),
                     "Using auth_manager for update request"
                 )
-                
+
                 # Make authenticated request
                 success, response_data = self.auth_manager.make_authenticated_request(
                     method="PATCH",
                     endpoint="pii",
                     data=update_data
                 )
-                
+
                 if success:
                     update_time = time.time() - self.time_update_start_time
                     self.update_log(
@@ -1862,7 +1891,8 @@ class PIIWindow(QMainWindow):
                         "Data updated successfully!"
                     )
                 else:
-                    error_msg = response_data.get('error', str(response_data)) if isinstance(response_data, dict) else str(response_data)
+                    error_msg = response_data.get('error', str(response_data)) if isinstance(
+                        response_data, dict) else str(response_data)
                     QMessageBox.warning(
                         self,
                         "Update Failed",
@@ -1872,7 +1902,7 @@ class PIIWindow(QMainWindow):
                         self.assistant.get_current_time(),
                         f"Update failed: {error_msg}"
                     )
-                    
+
         except Exception as e:
             QMessageBox.critical(
                 self,
@@ -1883,7 +1913,7 @@ class PIIWindow(QMainWindow):
                 self.assistant.get_current_time(),
                 f"Update process error: {str(e)}"
             )
-        
+
     def copy_selected_row(self):
         """Copy selected row data to clipboard."""
         if not hasattr(self, 'table_widget') or not self.table_widget:
@@ -1896,28 +1926,27 @@ class PIIWindow(QMainWindow):
                               for item in selected_items))
 
     def authenticate_and_connect(self):
-    #     """Authenticate user and connect to server with the reliable auth solution."""
-        
+        #     """Authenticate user and connect to server with the reliable auth solution."""
+
         self.btn_connect_server.setText('Authenticating...')
-        
+
         try:
             # Import the new authentication solution
             from API.complete_auth_solution import AuthService
-            
+
             # Initialize the auth service
             self.auth_service = AuthService(CONSTANTS.API_BASE_URL)
-            
+
             # Create agent with session token
             self.agent = Agent(
                 s3=CONSTANTS.AWS_S3,
                 file_name=CONSTANTS.AWS_FILE
             )
             self.assistant = Assistant(CONSTANTS.AWS_S3)
-            
+
             # Complete connection process
             self.connect_after_authentication()
-            
-       
+
         except Exception as e:
             logging.error(f"Authentication error: {e}")
             QMessageBox.critical(
@@ -1931,10 +1960,10 @@ class PIIWindow(QMainWindow):
 
     def connect_after_authentication(self):
         """Complete the connection process after successful authentication."""
-        
+
         self.btn_connect_server.setVisible(False)
         self.btn_display_data.setVisible(False)
-        
+
         self.log_table.setVisible(True)
         self.welcome_text.setVisible(True)
         self.data_table.setVisible(True)
@@ -1942,11 +1971,11 @@ class PIIWindow(QMainWindow):
             "background-color: green; color: white;"
         )
         self.btn_display_data.setToolTip('Click to download data')
-        
+
         # self.password_input.setVisible(True)
         # Clear password input
         # self.password_input.setHidden(True)
-        
+
         # Show session info button
         self.btn_session_info.setVisible(True)
 
@@ -1964,7 +1993,7 @@ class PIIWindow(QMainWindow):
                 method="GET",
                 endpoint="pii"
             )
-            
+
             if success and data is not None:
                 # Convert to DataFrame if needed
                 if not isinstance(data, pd.DataFrame):
@@ -1987,17 +2016,18 @@ class PIIWindow(QMainWindow):
             )
 
         # Log successful connection
-        timestamp = self.assistant.get_current_time() if hasattr(self, 'assistant') else QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
+        timestamp = self.assistant.get_current_time() if hasattr(
+            self, 'assistant') else QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
         self.update_log(timestamp, "Connected to Server.")
         self.update_log(timestamp, 'Display Data Button: Activated')
         self.update_log(timestamp, 'Add New Entry Button: Activated')
-        
+
         # Switch to PII tab
         self.tab_widget.setCurrentIndex(0)
 
     def connect_after_authentication(self):
         """Complete the connection process after successful authentication."""
-       
+
         self.log_table.setVisible(True)
         self.welcome_text.setVisible(True)
         self.data_table.setVisible(True)
@@ -2005,12 +2035,11 @@ class PIIWindow(QMainWindow):
             "background-color: green; color: white;"
         )
         self.btn_display_data.setToolTip('Click to download data')
-        
-        
+
         # Clear password input
         # self.password_input.clear()
         # self.password_input.setHidden(True)
-        
+
         # Show session info button
         self.btn_session_info.setVisible(True)
 
@@ -2028,7 +2057,7 @@ class PIIWindow(QMainWindow):
                 method="GET",
                 endpoint="pii"
             )
-            
+
             if success and data is not None:
                 # Convert to DataFrame if needed
                 if not isinstance(data, pd.DataFrame):
@@ -2043,11 +2072,12 @@ class PIIWindow(QMainWindow):
             )
 
         # Log successful connection
-        timestamp = self.assistant.get_current_time() if hasattr(self, 'assistant') else QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
+        timestamp = self.assistant.get_current_time() if hasattr(
+            self, 'assistant') else QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
         self.update_log(timestamp, "Connected to Server.")
         self.update_log(timestamp, 'Display Data Button: Activated')
         self.update_log(timestamp, 'Add New Entry Button: Activated')
-        
+
         # Switch to PII tab
         self.tab_widget.setCurrentIndex(0)
 
@@ -2057,40 +2087,42 @@ class PIIWindow(QMainWindow):
             # Ensure we have a session manager
             if not hasattr(self, 'session_manager'):
                 self.session_manager = SessionManager(self)
-            
+
             # Initialize the authentication service if not already done
             if not hasattr(self, 'auth_service'):
                 self.auth_service = AuthService(
                     api_base_url=CONSTANTS.API_BASE_URL,
                     session_manager=self.session_manager
                 )
-            
+
             # First try AWS SSO authentication if it's available
             aws_sso_available = False
-            
+
             if hasattr(self, 'session_manager') and self.session_manager.is_authenticated:
                 # Use existing SSO session
                 aws_sso_available = True
                 self.logger.info("Using existing AWS SSO session")
                 success, message = self.auth_service.authenticate_with_aws_sso()
-                
+
                 if not success:
-                    self.logger.warning(f"AWS SSO authentication failed: {message}")
+                    self.logger.warning(
+                        f"AWS SSO authentication failed: {message}")
                     aws_sso_available = False
-            
+
             # If AWS SSO is not available or failed, fall back to password authentication
             if not aws_sso_available:
                 self.logger.info("Falling back to password authentication")
-                
+
                 # For password auth, we need to get a token from the API
                 success, message = self.auth_service.authenticate_with_password(
                     username=os.environ.get('USER', 'default_user'),
                     # password=# self.password_input.text()
                 )
-                
+
                 if not success:
-                    raise ValueError(f"Password authentication failed: {message}")
-            
+                    raise ValueError(
+                        f"Password authentication failed: {message}")
+
             # Create agent with session token
             self.agent = Agent(
                 s3=CONSTANTS.AWS_S3,
@@ -2114,7 +2146,7 @@ class PIIWindow(QMainWindow):
             self.btn_connect_server.setToolTip(
                 'You are Connected Successfully. Button Disabled'
             )
-            
+
             # Show session info button
             self.btn_session_info.setVisible(True)
 
@@ -2131,7 +2163,7 @@ class PIIWindow(QMainWindow):
                 method="GET",
                 endpoint="pii"
             )
-            
+
             if success and data is not None:
                 # Convert to DataFrame if needed
                 if not isinstance(data, pd.DataFrame):
@@ -2148,10 +2180,10 @@ class PIIWindow(QMainWindow):
             self.update_log(timestamp, "Connected to Server.")
             self.update_log(timestamp, 'Display Data Button: Activated')
             self.update_log(timestamp, 'Add New Entry Button: Activated')
-            
+
             # Switch to PII tab
             self.tab_widget.setCurrentIndex(0)
-            
+
         except Exception as e:
             QMessageBox.critical(
                 self,
@@ -2164,7 +2196,7 @@ class PIIWindow(QMainWindow):
                 self.authenticate_and_connect
             )
             self.btn_connect_server.clicked.connect(self.show_password_input)
-            
+
             # Logout from session manager
             if hasattr(self, 'session_manager'):
                 self.session_manager.logout()
@@ -2175,13 +2207,14 @@ class PIIWindow(QMainWindow):
         button_container = QWidget(self)
         button_layout = QHBoxLayout(button_container)
         button_layout.setContentsMargins(0, 0, 10, 0)  # Right margin of 10
-        
+
         # Session info button
         if hasattr(self, 'btn_session_info'):
             self.btn_session_info.setParent(button_container)
             button_layout.addWidget(self.btn_session_info)
         else:
-            self.btn_session_info = QPushButton('Session Info', button_container)
+            self.btn_session_info = QPushButton(
+                'Session Info', button_container)
             self.btn_session_info.setCursor(QCursor(Qt.PointingHandCursor))
             self.btn_session_info.clicked.connect(self.show_session_info)
             self.btn_session_info.setShortcut("Ctrl+I")
@@ -2190,7 +2223,7 @@ class PIIWindow(QMainWindow):
             )
             self.btn_session_info.setToolTip('View session information')
             button_layout.addWidget(self.btn_session_info)
-        
+
         # Logout button
         self.btn_logout = QPushButton('Logout', button_container)
         self.btn_logout.setCursor(QCursor(Qt.PointingHandCursor))
@@ -2201,7 +2234,7 @@ class PIIWindow(QMainWindow):
         )
         self.btn_logout.setToolTip('Click to Logout')
         button_layout.addWidget(self.btn_logout)
-        
+
         # Position button container in top right
         button_container.setGeometry(
             self.width() - 230, 10, 220, 50
@@ -2239,8 +2272,9 @@ class PIIWindow(QMainWindow):
             )
 
             # Get sub-options for the selected category
-            sub_options = self.agent.get_sub_options_to_choose(selected_item_text)
-            
+            sub_options = self.agent.get_sub_options_to_choose(
+                selected_item_text)
+
             # Ensure sub_options is a list of strings
             if not isinstance(sub_options, list):
                 self.update_log(
@@ -2253,7 +2287,7 @@ class PIIWindow(QMainWindow):
                     f"Unexpected data format for sub-options: {type(sub_options)}"
                 )
                 return
-                
+
             # Ensure we have sub-options to display
             if not sub_options:
                 self.update_log(
@@ -2288,10 +2322,10 @@ class PIIWindow(QMainWindow):
                     self.assistant.get_current_time(),
                     f"Selected {selected_item_text}'s sub option: {sub_option}"
                 )
-                
+
                 # Get the output data
                 output = self.agent.get_final_output(sub_option)
-                
+
                 # Show the output data
                 self.show_output_dialog(sub_option, output)
         except Exception as e:
@@ -2335,7 +2369,7 @@ class PIIWindow(QMainWindow):
         if not isinstance(output, list):
             # Convert to a list with a single item if it's not already a list
             output = [output]
-            
+
         num_items = len(output)
         item_height = 50  # Approximate height for each item
         base_height = 100  # Base height for dialog components
@@ -2350,13 +2384,13 @@ class PIIWindow(QMainWindow):
 
         # Set up dialog layout
         dialog_layout = QVBoxLayout(dialog)
-        
+
         # Log before setting up dialog content
         self.update_log(
             self.assistant.get_current_time(),
             f"Setting up dialog for {self.option}, output type: {type(output)}, length: {len(output)}"
         )
-        
+
         self.setup_dialog_content(dialog, dialog_layout, output)
 
         # Show dialog
@@ -2389,7 +2423,7 @@ class PIIWindow(QMainWindow):
                     # Process each item in the list
                     for i, item in enumerate(output):
                         h_layout = QHBoxLayout()
-                        
+
                         # Handle string items
                         if isinstance(item, str):
                             label = QLabel(item, dialog)
@@ -2399,7 +2433,8 @@ class PIIWindow(QMainWindow):
                             scroll_layout.addSpacing(10)
                         # Handle dictionary items
                         elif isinstance(item, dict):
-                            self.add_dict_item_to_layout(dialog, h_layout, scroll_layout, item)
+                            self.add_dict_item_to_layout(
+                                dialog, h_layout, scroll_layout, item)
                         # Handle other types
                         else:
                             label = QLabel(str(item), dialog)
@@ -2418,7 +2453,7 @@ class PIIWindow(QMainWindow):
             error_label.setWordWrap(True)
             error_label.setStyleSheet("color: red;")
             scroll_layout.addWidget(error_label)
-            
+
             # Log the error
             self.update_log(
                 self.assistant.get_current_time(),
@@ -2470,29 +2505,29 @@ class PIIWindow(QMainWindow):
             # Extract item data
             item_name = str(item.get('Item Name', 'N/A'))
             item_data = str(item.get('Data', 'N/A'))
-            
+
             # Create label with item data
             label = QLabel(f"{item_name} : {item_data}", dialog)
-            
+
             # Create copy button
             copy_button = QPushButton('Copy', dialog)
             copy_button.setToolTip('Click to copy the data')
             copy_button.setCursor(QCursor(Qt.PointingHandCursor))
-            
+
             # Store button reference in item for later use
             item_copy = item.copy()  # Make a copy to avoid modifying the original
             item_copy["Button"] = copy_button
-            
+
             # Connect button to copy function
             copy_button.clicked.connect(
                 lambda checked, data=item_copy: self.copy_to_clipboard(data)
             )
-            
+
             # Style components
             label.setWordWrap(True)
             copy_button.setStyleSheet("background-color: White; color: Black;")
             label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-            
+
             # Add to layout
             h_layout.addWidget(label)
             h_layout.addWidget(copy_button)
@@ -2506,7 +2541,7 @@ class PIIWindow(QMainWindow):
             h_layout.addWidget(error_label)
             scroll_layout.addLayout(h_layout)
             scroll_layout.addSpacing(10)
-            
+
             # Log the error
             self.update_log(
                 self.assistant.get_current_time(),
@@ -2701,44 +2736,51 @@ class PIIWindow(QMainWindow):
     def delete_item(self):
         """Delete the selected item using the CRUD Helper."""
         if not hasattr(self, 'table_widget') or not self.table_widget:
-            QMessageBox.warning(self, "Delete Error", "Data table not available.")
+            QMessageBox.warning(self, "Delete Error",
+                                "Data table not available.")
             return
 
         selected_items = self.table_widget.selectedItems()
         if not selected_items:
-            QMessageBox.warning(self, "Delete Error", "No item selected to delete.")
+            QMessageBox.warning(self, "Delete Error",
+                                "No item selected to delete.")
             return
 
         # Extract row data
         row = selected_items[0].row()
         delete_data = CRUDHelper.extract_row_data(self.table_widget, row)
-        
+
         # Log the delete attempt
         self.update_log(
             self.assistant.get_current_time(),
             f"Attempting to delete item with ID: {delete_data.get('_id', 'unknown')}"
         )
-        
+
         # Confirm deletion
         if not self.confirm_delete(delete_data):
             return
-        
+
         # Use CRUD Helper to perform the operation
         success, response = CRUDHelper.perform_operation(
             'delete',
             delete_data,
             agent=self.agent if hasattr(self, 'agent') else None,
-            auth_service=self.auth_service if hasattr(self, 'auth_service') else None,
-            auth_manager=self.auth_manager if hasattr(self, 'auth_manager') else None,
-            logger=lambda msg: self.update_log(self.assistant.get_current_time(), msg)
+            auth_service=self.auth_service if hasattr(
+                self, 'auth_service') else None,
+            auth_manager=self.auth_manager if hasattr(
+                self, 'auth_manager') else None,
+            logger=lambda msg: self.update_log(
+                self.assistant.get_current_time(), msg)
         )
-        
+
         if success:
-            QMessageBox.information(self, "Deletion Complete", "Item deleted successfully!")
+            QMessageBox.information(
+                self, "Deletion Complete", "Item deleted successfully!")
             self.table_widget.removeRow(row)
             self.modified = True
         else:
-            QMessageBox.warning(self, "Delete Failed", f"Failed to delete item: {response}")
+            QMessageBox.warning(self, "Delete Failed",
+                                f"Failed to delete item: {response}")
 
     def get_item_info_from_selection(self, selected_items):
         """
@@ -2751,48 +2793,49 @@ class PIIWindow(QMainWindow):
             dict: Item information
         """
         item_info = {'Category': '', 'Type': '', '_id': ''}
-        
+
         if not selected_items:
             return item_info
-            
+
         # Get the row of the first selected item
         row = selected_items[0].row()
-        
+
         # Log what row we're examining
         self.update_log(
             self.assistant.get_current_time(),
             f"Extracting info from row {row}"
         )
-        
+
         # Check all columns in this row
         for column in range(self.table_widget.columnCount()):
             header = self.table_widget.horizontalHeaderItem(column)
             if not header:
                 continue
-                
+
             column_name = header.text()
             cell_item = self.table_widget.item(row, column)
-            
+
             if not cell_item:
                 self.update_log(
                     self.assistant.get_current_time(),
                     f"Warning: Cell for column '{column_name}' is empty"
                 )
                 continue
-                
+
             cell_value = cell_item.text()
-            
+
             # Store values for key fields
             if column_name in item_info:
                 item_info[column_name] = cell_value
-                
+
         # Log what we found
-        field_info = ", ".join([f"{k}: {v}" for k, v in item_info.items() if v])
+        field_info = ", ".join(
+            [f"{k}: {v}" for k, v in item_info.items() if v])
         self.update_log(
             self.assistant.get_current_time(),
             f"Extracted fields: {field_info}"
         )
-        
+
         # Check if we have the essential fields
         missing_fields = [k for k, v in item_info.items() if not v]
         if missing_fields:
@@ -2800,7 +2843,7 @@ class PIIWindow(QMainWindow):
                 self.assistant.get_current_time(),
                 f"Warning: Missing fields: {', '.join(missing_fields)}"
             )
-        
+
         return item_info
 
     def confirm_delete(self, item_info):
@@ -2938,17 +2981,21 @@ class PIIWindow(QMainWindow):
 
         if event:
             event.accept()
-        
+
     def setup_session_manager(self):
         """Set up the session manager and connect signals."""
         # Create session manager with 1-hour session timeout
-        self.session_manager = SessionManager(self, token_ttl=3600)  # 1 hour session
-        
+        self.session_manager = SessionManager(
+            self, token_ttl=3600)  # 1 hour session
+
         # Connect signals
-        self.session_manager.session_expired.connect(self.handle_session_expired)
-        self.session_manager.token_refreshed.connect(self.handle_token_refreshed)
-        self.session_manager.session_expiring_soon.connect(self.handle_session_expiring_soon)
-        
+        self.session_manager.session_expired.connect(
+            self.handle_session_expired)
+        self.session_manager.token_refreshed.connect(
+            self.handle_token_refreshed)
+        self.session_manager.session_expiring_soon.connect(
+            self.handle_session_expiring_soon)
+
         # Log initialization
         if hasattr(self, 'update_log'):
             timestamp = QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
@@ -2959,15 +3006,15 @@ class PIIWindow(QMainWindow):
         # Create status bar
         self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
-        
+
         # Add session timer display
         self.session_timer_label = QLabel("Not logged in")
         self.statusBar.addPermanentWidget(self.session_timer_label)
-        
+
         # Add session type indicator
         self.session_type_label = QLabel("")
         self.statusBar.addPermanentWidget(self.session_type_label)
-        
+
         # Set up timer to update status bar
         self.status_timer = QTimer()
         self.status_timer.timeout.connect(self.update_session_status)
@@ -2979,27 +3026,31 @@ class PIIWindow(QMainWindow):
             self.session_timer_label.setText("Not logged in")
             self.session_type_label.setText("")
             return
-        
+
         # Get session info
         session_info = self.session_manager.get_session_info()
-        
+
         # Update session time remaining
         if session_info["remaining_seconds"] is not None:
-            self.session_timer_label.setText(f"Session: {session_info['remaining_formatted']} remaining")
-            
+            self.session_timer_label.setText(
+                f"Session: {session_info['remaining_formatted']} remaining")
+
             # Set color based on remaining time
             if session_info["remaining_seconds"] < 300:  # Less than 5 minutes
-                self.session_timer_label.setStyleSheet("color: red; font-weight: bold")
+                self.session_timer_label.setStyleSheet(
+                    "color: red; font-weight: bold")
             elif session_info["remaining_seconds"] < 600:  # Less than 10 minutes
-                self.session_timer_label.setStyleSheet("color: orange; font-weight: bold")
+                self.session_timer_label.setStyleSheet(
+                    "color: orange; font-weight: bold")
             else:
                 self.session_timer_label.setStyleSheet("")
-        
+
         # Update auth type indicator
         auth_type = session_info["auth_type"]
         if auth_type == "aws_sso":
             self.session_type_label.setText("AWS SSO")
-            self.session_type_label.setStyleSheet("color: blue; font-weight: bold")
+            self.session_type_label.setStyleSheet(
+                "color: blue; font-weight: bold")
         elif auth_type == "password":
             self.session_type_label.setText("Password")
             self.session_type_label.setStyleSheet("")
@@ -3010,13 +3061,13 @@ class PIIWindow(QMainWindow):
         timestamp = QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
         if hasattr(self, 'update_log'):
             self.update_log(timestamp, "Session expired - logging out")
-        
+
         QMessageBox.warning(
             self,
             "Session Expired",
             "Your session has expired. Please log in again."
         )
-        
+
         # Force logout
         self.logout_user()
 
@@ -3024,34 +3075,34 @@ class PIIWindow(QMainWindow):
         """Handle token refresh event."""
         if not hasattr(self, 'session_manager'):
             return
-            
+
         session_info = self.session_manager.get_session_info()
-        
+
         # Log the refresh
         timestamp = QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
         if hasattr(self, 'assistant') and self.assistant:
             timestamp = self.assistant.get_current_time()
-            
+
         if hasattr(self, 'update_log'):
             self.update_log(
                 timestamp,
                 f"Session token refreshed. New expiration: {session_info['remaining_formatted']} from now"
             )
-        
+
         # Update status display
         self.update_session_status()
 
     def handle_session_expiring_soon(self, minutes_remaining):
         """
         Handle notification that session is expiring soon.
-        
+
         Args:
             minutes_remaining (int): Minutes until session expires
         """
         # Only notify if we're on the PII data tab (not YouTube downloader)
         if not hasattr(self, 'tab_widget') or self.tab_widget.currentIndex() != 0:
             return
-            
+
         QMessageBox.information(
             self,
             "Session Expiring Soon",
@@ -3068,9 +3119,9 @@ class PIIWindow(QMainWindow):
                 "You are not currently logged in."
             )
             return
-        
+
         session_info = self.session_manager.get_session_info()
-        
+
         # Add API authentication info if available
         api_auth_info = ""
         if hasattr(self, 'auth_service'):
@@ -3082,7 +3133,7 @@ class PIIWindow(QMainWindow):
                     f"Authentication Type: {user_info['auth_type']}\n"
                     f"Token Expires: {user_info['token_expires_at']}"
                 )
-        
+
         QMessageBox.information(
             self,
             "Session Info",
@@ -3096,49 +3147,23 @@ class PIIWindow(QMainWindow):
             f"{api_auth_info}"
         )
 
-    # In the authenticate_and_connect method of UI/Desktop/main.py
-
-    # def authenticate_and_connect(self):
-    #     """Authenticate user and connect to server."""
-    #     username = os.environ.get('USER', 'default_user')
-    #     password = # self.password_input.text()
-        
-    #     # Initialize auth manager if not already done
-    #     if not hasattr(self, 'auth_manager'):
-    #         from UI.Desktop.auth_manager import AuthenticationManager
-    #         self.auth_manager = AuthenticationManager(self)
-        
-    #     # Attempt authentication
-    #     if self.auth_manager.authenticate_with_password(username, password):
-    #         # Authentication successful
-    #         self.connect_to_server()
-    #         # self.password_input.clear()
-    #         self.update_log(
-    #             QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
-    #             f"Authentication successful for user: {self.auth_manager.user_id}"
-    #         )
-    #     else:
-    #         # Authentication failed
-    #         self.btn_connect_server.setText('Connect to Server')
-    #         self.btn_connect_server.setDisabled(False)
-    #         # self.password_input.clear()
-
     # Update the authenticate_with_sso method:
+
     def authenticate_with_sso(self, parent_widget=None) -> bool:
         """Authenticate using AWS SSO."""
         self.btn_sso_login.setText('Authenticating with SSO...')
         self.btn_sso_login.setDisabled(True)
-        
+
         # Attempt AWS SSO authentication
         auth_success = self.session_manager.authenticate_aws_sso(self)
-        
+
         if auth_success:
             # Connect to server
             self.connect_to_server()
-            
+
             # Update session status
             self.update_session_status()
-            
+
             # Log successful authentication
             session_info = self.session_manager.get_session_info()
             timestamp = QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
@@ -3147,7 +3172,6 @@ class PIIWindow(QMainWindow):
                 f"AWS SSO authentication successful - Session valid for {session_info['remaining_formatted']}"
             )
             self.btn_sso_login.setVisible(False)
-            # self.btn_logout.setDisabled(True)
         else:
             # Reset button state
             self.btn_sso_login.setText('AWS SSO Login')
@@ -3158,43 +3182,44 @@ class PIIWindow(QMainWindow):
         """Perform logout operations."""
         if not self.assistant:
             QMessageBox.warning(self, "Logout Error",
-                            "Not currently logged in.")
+                                "Not currently logged in.")
             return
 
         timestamp = self.assistant.get_current_time()
         self.update_log(timestamp, 'Logging Out...')
-        
+
         # Switch to YouTube downloader tab before logout
         if hasattr(self, 'tab_widget') and hasattr(self, 'downloader_widget'):
-            downloader_tab_index = self.tab_widget.indexOf(self.downloader_widget)
+            downloader_tab_index = self.tab_widget.indexOf(
+                self.downloader_widget)
             self.tab_widget.setCurrentIndex(downloader_tab_index)
-        
+
         self.ui_components()
         self.update_log(timestamp, 'Logged Out Successfully.')
-        
+
         # Cleanup
         self.cleanup_on_exit()
         self.modified = False
-        
+
         # Hide logout button
         if hasattr(self, 'btn_logout') and self.btn_logout:
             self.btn_logout.setVisible(False)
-        
+
         # Logout from session manager
         if hasattr(self, 'session_manager'):
             self.session_manager.logout()
             self.update_session_status()
-        
+
         # Cleanup assistants
         if hasattr(self, 'assistant') and self.assistant:
             self.assistant.logout()
         self.agent = None
-        
+
         # Switch to YouTube downloader tab again to ensure it's visible
         if hasattr(self, 'tab_widget') and hasattr(self, 'downloader_widget'):
-            downloader_tab_index = self.tab_widget.indexOf(self.downloader_widget)
+            downloader_tab_index = self.tab_widget.indexOf(
+                self.downloader_widget)
             self.tab_widget.setCurrentIndex(downloader_tab_index)
-
 
 
 if __name__ == '__main__':
