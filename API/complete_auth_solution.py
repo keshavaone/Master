@@ -52,48 +52,6 @@ JWT_SECRET = os.environ.get("AUTH_JWT_SECRET", "your_jwt_secret")
 JWT_ALGORITHM = "HS256"
 TOKEN_EXPIRE_MINUTES = 60
 
-def get_app_password():
-    """
-    Get the application password from constants or environment.
-    
-    Returns:
-        str: The application password
-    """
-    password = CONSTANTS.APP_PASSWORD
-    if not password:
-        # Try environment variable as fallback
-        password = os.environ.get("APP_PASSWORD")
-    
-    return password
-
-def verify_password(input_password: str, stored_password: str = None) -> bool:
-    """
-    Verify if the provided password matches the stored password.
-    
-    Args:
-        input_password (str): Password to verify
-        stored_password (str, optional): Password to compare against
-        
-    Returns:
-        bool: True if passwords match
-    """
-    if not stored_password:
-        stored_password = get_app_password()
-        
-    if not stored_password:
-        logger.error("No stored password available for verification")
-        return False
-    
-    # Direct string comparison first
-    if input_password == stored_password:
-        return True
-    
-    # Hash-based comparison as fallback
-    hashed_input = hashlib.sha256(input_password.encode()).hexdigest()
-    hashed_stored = hashlib.sha256(stored_password.encode()).hexdigest()
-    
-    return hashed_input == hashed_stored
-
 def create_jwt_token(user_id: str, user_data: Dict[str, Any] = None, expires_minutes: int = None) -> str:
     """
     Create a JWT token directly.
@@ -141,91 +99,6 @@ def create_jwt_token(user_id: str, user_data: Dict[str, Any] = None, expires_min
         logger.error(f"Failed to create JWT token: {e}")
         # Return a fallback token for testing
         return f"FALLBACK_TOKEN_{user_id}_{int(now)}"
-
-def authenticate(username: str, password: str = None) -> Tuple[bool, Dict[str, Any]]:
-    """
-    Authenticate a user and get a token.
-    
-    This function tries multiple authentication methods:
-    1. Password verification + direct JWT token generation
-    2. API token endpoint (if available)
-    
-    Args:
-        username (str): Username to authenticate
-        password (str, optional): Password to authenticate with
-        
-    Returns:
-        Tuple[bool, Dict[str, Any]]: (Success flag, token data or error)
-    """
-    # Always use "admin" as the username for API requests
-    api_username = "admin"
-    
-    # If no password provided, try to get it from constants
-    if not password:
-        password = get_app_password()
-        if not password:
-            return False, {"error": "No password provided or available"}
-    
-    # Method 1: Direct JWT token generation
-    try:
-        logger.info(f"Attempting direct JWT token generation for {username}")
-        
-        # Verify password
-        if not verify_password(password):
-            logger.error("Password verification failed")
-            return False, {"error": "Invalid password"}
-        
-        # Create token directly
-        token = create_jwt_token(username)
-        
-        # Create token data
-        token_data = {
-            "access_token": token,
-            "token_type": "bearer",
-            "expires_in": TOKEN_EXPIRE_MINUTES * 60,
-            "user_id": username
-        }
-        
-        logger.info(f"Successfully created JWT token for {username}")
-        return True, token_data
-    except Exception as e:
-        logger.error(f"Direct token generation failed: {e}")
-        # Continue to next method
-    
-    # Method 2: Try API token endpoint (multiple formats)
-    try:
-        logger.info(f"Attempting API token endpoint with username: {api_username}")
-        
-        # Try JSON body
-        response = requests.post(
-            f"{CONSTANTS.API_BASE_URL}/auth/token",
-            json={"username": api_username, "password": password}
-        )
-        
-        if response.status_code == 200:
-            token_data = response.json()
-            logger.info("API token endpoint succeeded with JSON body")
-            return True, token_data
-        
-        # Try headers
-        response = requests.post(
-            f"{CONSTANTS.API_BASE_URL}/auth/token",
-            headers={"username": api_username, "password": password}
-        )
-        
-        if response.status_code == 200:
-            token_data = response.json()
-            logger.info("API token endpoint succeeded with headers")
-            return True, token_data
-        
-        # If all API methods failed, log the last error
-        logger.error(f"API token endpoint failed: {response.status_code} - {response.text}")
-        
-    except Exception as e:
-        logger.error(f"API token endpoint error: {e}")
-    
-    # If we reach here, all methods failed
-    return False, {"error": "All authentication methods failed"}
 
 def make_authenticated_request(token: str, method: str, endpoint: str, 
                                data: Any = None, params: Dict = None) -> Tuple[bool, Any]:
@@ -310,40 +183,7 @@ class AuthService:
         
         self.logger.info(f"Authentication service initialized for {self.api_base_url}")
     
-    def authenticate(self, username: str, password: str = None) -> Tuple[bool, str]:
-        """
-        Authenticate with username and password.
-        
-        Args:
-            username (str): Username for authentication
-            password (str, optional): Password for authentication
-            
-        Returns:
-            Tuple[bool, str]: (Success flag, message)
-        """
-        try:
-            self.logger.info(f"Authenticating user: {username}")
-            
-            success, result = authenticate(username, password)
-            
-            if not success:
-                error_msg = result.get("error", "Unknown authentication error")
-                self.logger.error(f"Authentication failed: {error_msg}")
-                return False, error_msg
-            
-            # Set authentication data
-            self.token = result["access_token"]
-            self.user_id = result["user_id"]
-            self.token_expiration = time.time() + result.get("expires_in", 3600)
-            
-            self.logger.info(f"Authentication successful for user: {self.user_id}")
-            return True, "Authentication successful"
-            
-        except Exception as e:
-            error_msg = f"Authentication error: {str(e)}"
-            self.logger.error(error_msg)
-            return False, error_msg
-    
+
     def is_authenticated(self) -> bool:
         """
         Check if the user is authenticated.
@@ -401,52 +241,3 @@ class AuthService:
         self.token = None
         self.token_expiration = None
         self.user_id = None
-
-# Test the authentication solution
-def test_auth_solution():
-    """Test the authentication solution."""
-    logger.info("Testing authentication solution")
-    
-    # Get the app password
-    password = get_app_password()
-    if not password:
-        logger.error("No APP_PASSWORD available. Set it in CONSTANTS or environment.")
-        return
-    
-    # Try to authenticate
-    username = "admin"
-    success, result = authenticate(username, password)
-    
-    if success:
-        logger.info(f"Authentication successful for {username}")
-        token = result["access_token"]
-        
-        # Try to make an authenticated request
-        success, response = make_authenticated_request(
-            token,
-            "GET",
-            "health"
-        )
-        
-        if success:
-            logger.info(f"Health check succeeded: {response}")
-            
-            # Try a protected endpoint
-            success, user_data = make_authenticated_request(
-                token,
-                "GET",
-                "pii"
-            )
-            
-            if success:
-                logger.info(f"Protected endpoint access succeeded: {user_data}")
-            else:
-                logger.error(f"Protected endpoint access failed: {user_data}")
-        else:
-            logger.error(f"Health check failed: {response}")
-    else:
-        logger.error(f"Authentication failed: {result}")
-
-if __name__ == "__main__":
-    # Run test when module is executed directly
-    test_auth_solution()

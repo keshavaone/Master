@@ -212,39 +212,7 @@ async def auth_with_aws_sso(
             detail=f"Authentication error: {str(e)}",
         )
 
-# Authentication endpoints
 
-
-@app.post("/auth/token", response_model=TokenResponse, tags=["Authentication"])
-async def create_token(username: str = Header(...), password: str = Header(...)):
-    """
-    Create an authentication token with username/password.
-
-    This is for development and testing purposes only.
-    In production, use SSO authentication.
-    """
-    # In production, validate against a secure user database
-    # This is a simplified example for development only
-    if username != "admin" or password != CONSTANTS.APP_PASSWORD:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    # Import here to avoid circular imports
-    from API.auth_middleware import create_jwt_token
-
-    # Create and return token
-    token = create_jwt_token(username)
-    expires_in = 60 * 60  # 1 hour
-
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "expires_in": expires_in,
-        "user_id": username
-    }
 
 
 @app.get("/auth/user", tags=["Authentication"])
