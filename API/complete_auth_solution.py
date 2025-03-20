@@ -7,11 +7,10 @@ the server's authentication endpoints are not working properly.
 
 import os
 import time
-import json
 import logging
 import hashlib
 import requests
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Tuple
 import API.CONSTANTS as CONSTANTS
 
 # Configure logging

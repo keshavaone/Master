@@ -9,7 +9,7 @@ user feedback.
 import logging
 import traceback
 import json
-from typing import Dict, Any, Tuple, Optional, Callable
+from typing import Dict, Any, Optional, Callable
 from PyQt5.QtWidgets import QMessageBox, QApplication, QProgressDialog
 from PyQt5.QtCore import Qt
 

@@ -3,7 +3,6 @@ Authentication implementation for the desktop application.
 Add this to your UI/Desktop/main.py file or create a new dedicated module.
 """
 
-import os
 import requests
 import time
 import json

@@ -7,14 +7,11 @@ modern, user-friendly interface.
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QDialog, QLineEdit, QScrollArea, QFrame, QMessageBox,
-    QProgressBar, QStyle, QComboBox, QRadioButton, QButtonGroup,
-    QGroupBox, QSizePolicy, QApplication, QTabWidget, QDialogButtonBox
+    QProgressBar, QStyle, QComboBox,
+    QGroupBox, QApplication
 )
-from PyQt5.QtGui import QPainter, QColor, QIcon, QPalette, QGuiApplication, QCursor
-from PyQt5.QtCore import Qt, QSize, QTimer, pyqtSignal, QDateTime
-import json
+from PyQt5.QtCore import Qt, QSize, QTimer, QDateTime
 import ast
-import time
 import logging
 
 logger = logging.getLogger("modern_ui")

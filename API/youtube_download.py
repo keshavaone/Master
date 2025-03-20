@@ -11,8 +11,8 @@ import subprocess
 import threading
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
-    QLineEdit, QProgressBar, QFileDialog, QComboBox, QGroupBox,
-    QRadioButton, QButtonGroup, QMessageBox, QSizePolicy, QApplication
+    QLineEdit, QProgressBar, QFileDialog, QGroupBox,
+    QRadioButton, QButtonGroup, QMessageBox, QApplication
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer, QDateTime, QDateTime
 

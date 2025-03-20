@@ -7,7 +7,6 @@ Place this file at API/auth_middleware_enhanced.py and update imports accordingl
 
 import os
 import time
-import json
 import logging
 import boto3
 import jwt

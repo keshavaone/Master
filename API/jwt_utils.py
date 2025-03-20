@@ -5,7 +5,6 @@ This module handles JWT token generation, validation, and management.
 """
 
 import os
-import time
 import datetime
 import logging
 import secrets

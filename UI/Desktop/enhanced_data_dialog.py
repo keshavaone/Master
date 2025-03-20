@@ -2,23 +2,21 @@
 Enhanced data dialog with proper CRUD functionality for PII data management.
 """
 
-import os
 import logging
 import ast
-import json
 import time
 import traceback
-from typing import Any, Dict, List, Tuple, Optional, Union
+from typing import Any, Dict, Tuple
 
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QPushButton, QLabel, QLineEdit, QComboBox, QMessageBox, QFrame,
     QHeaderView, QAbstractItemView, QApplication, QSplitter, QWidget,
-    QGroupBox, QFormLayout, QTextEdit, QScrollArea, QSizePolicy, QStyle,
-    QProgressDialog, QMenu, QDialogButtonBox
+    QGroupBox, QFormLayout, QTextEdit, QScrollArea,
+    QProgressDialog, QMenu
 )
-from PyQt5.QtCore import Qt, QSize, QTimer, QDateTime
-from PyQt5.QtGui import QIcon, QColor, QPalette, QFont
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QFont
 import pandas as pd
 
 

@@ -14,7 +14,7 @@ from PyQt5.QtWidgets import (
     QLineEdit, QProgressBar, QFileDialog, QGroupBox,
     QRadioButton, QButtonGroup, QMessageBox, QApplication
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
 from PyQt5.QtGui import QIcon, QCursor
 
 class DownloadWorker(QObject):

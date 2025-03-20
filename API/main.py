@@ -2,7 +2,7 @@ from logging.handlers import RotatingFileHandler
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 from collections import Counter
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 from pydantic import BaseModel, Field, ValidationError
 import API.CONSTANTS as CONSTANTS
 from API.Backend import Agent
@@ -14,7 +14,6 @@ import time
 import uuid
 import pandas as pd
 import os
-import ast
 from botocore.exceptions import ClientError
 from datetime import datetime
 from API.aws_sso_endpoint import aws_sso_router

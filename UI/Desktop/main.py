@@ -15,7 +15,6 @@ import time
 import ast
 import json
 import logging
-import subprocess
 from logging.handlers import RotatingFileHandler
 
 # Third-party imports
@@ -26,7 +25,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QTableWidget,
     QHeaderView, QTableWidgetItem, QDialog, QScrollArea, QSizePolicy,
     QAbstractItemView, QApplication, QMenu, QAction, QTabWidget,
-    QProgressBar, QStatusBar, QProgressDialog
+    QStatusBar, QProgressDialog
 )
 from UI.Desktop.session_manager import SessionManager
 from API.auth_service import EnhancedAuthService as AuthService
@@ -36,8 +35,8 @@ from UI.Desktop.modern_components import ModernButton, SessionStatusWidget, Mode
 
 # Local application imports
 from API.Backend import Agent
-from API.youtube_download import YouTubeDownloaderWidget, integrate_youtube_downloader
-from API.assistant import Assistant
+from API.youtube_download import YouTubeDownloaderWidget
+from API.Assistant import Assistant
 import API.CONSTANTS as CONSTANTS
 
 # Setup logging with rotation

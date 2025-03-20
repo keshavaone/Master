@@ -6,14 +6,12 @@ handling authentication, request formatting, and error handling with robust
 response handling for all data types.
 """
 
-import os
 import json
 import logging
 import asyncio
 import requests
-import time
 import traceback
-from typing import Dict, Any, Optional, Tuple, List, Union
+from typing import Dict, Any, Tuple, List, Union
 from urllib.parse import urljoin
 import API.CONSTANTS as CONSTANTS
 

@@ -4,15 +4,13 @@ Enhanced Authentication Service for GUARD Application
 This service provides a unified authentication layer between frontend and API,
 properly handling AWS SSO tokens and session TTLs.
 """
-
-import os
 import time
-import json
 import logging
 import datetime
+
 import boto3
-from typing import Dict, Any, Optional, Tuple
-from botocore.exceptions import ClientError, ProfileNotFound, NoCredentialsError
+from typing import Dict, Any, Tuple
+from botocore.exceptions import NoCredentialsError
 
 # Configure logging
 logger = logging.getLogger("enhanced_auth_service")

@@ -6,7 +6,7 @@ Add these endpoints to your main.py file.
 """
 
 from fastapi import APIRouter, Header, Request, HTTPException, status
-from typing import Optional, Dict, Any
+from typing import Optional, Any
 from pydantic import BaseModel
 import boto3
 import logging

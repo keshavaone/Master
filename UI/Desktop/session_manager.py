@@ -6,21 +6,16 @@ token refresh mechanisms, and expiration handling.
 """
 
 import os
-import sys
 import time
 import json
 import hashlib
 import logging
 import datetime
 import boto3
-import tempfile
 import subprocess
-from typing import Dict, Any, Optional, Tuple
-from botocore.exceptions import ClientError, ProfileNotFound
-from PyQt5.QtWidgets import QMessageBox, QInputDialog, QLineEdit, QProgressDialog
-from PyQt5.QtCore import QTimer, QDateTime, QObject, pyqtSignal, QEventLoop
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QProgressDialog, QMessageBox
+from typing import Dict, Any, Optional
+from PyQt5.QtWidgets import QInputDialog, QLineEdit
+from PyQt5.QtCore import QTimer, QObject, pyqtSignal
 
 
 class SessionManager(QObject):
