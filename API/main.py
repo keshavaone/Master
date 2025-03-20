@@ -14,6 +14,7 @@ import time
 import uuid
 import pandas as pd
 import os
+import ast
 from botocore.exceptions import ClientError
 from datetime import datetime
 from API.aws_sso_endpoint import aws_sso_router
@@ -353,6 +354,20 @@ async def delete_pii_item(
 async def get_pii_data(current_user: Dict[str, Any] = Depends(get_current_user)):
     """Get all PII data."""
     try:
+        print("getting user info")
+        print(current_user)
+        if current_user is None:
+            print("current user is none")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+        print("current user is not none")
+        print(current_user['sub'].split(':')[1])
+
+        # Ensure the user is authenticated and has the required permissions
+        if current_user.get("sub") is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+        # Process 
         data = process_data(None, 'get', current_user)
 
         # Ensure data is properly formatted for response model
