@@ -128,8 +128,8 @@ The desktop application provides a secure interface for:
 
 1. Clone the repository:
    ```
-   git clone https://github.com/username/guard-pii-management.git
-   cd guard-pii-management
+   https://github.com/keshavaone/Master.git
+   cd Master
    ```
 
 2. Install dependencies:
