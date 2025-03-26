@@ -1,4 +1,5 @@
 import boto3
+from boto3.dynamodb.conditions import Attr
 from dataclasses import dataclass, field
 import base64
 import os
@@ -342,16 +343,18 @@ class Agent:
             # Return empty list on error
             return []
 
-    def get_one_data(self):
+    def get_one_data(self,type_value):
         """
         Get a specific data item.
 
         Returns:
             str: The data item
         """
-        return_item = self.collection.find_one(
-            {'Category': 'System', 'Type': 'KeyPassword'})
-        return return_item['PII']
+        filters = dict()
+        filters['Type'] = type_value
+        
+        return_item = self.collection.scan(FilterExpression=Attr('Type').eq(filters['Type']))['Items'][0]
+        return self.decrypt_data(base64.b64decode(return_item['PII']))
 
     def insert_new_data(self, item):
         """
@@ -1176,4 +1179,7 @@ class Agent:
 
 if __name__ == '__main__':
     agent = Agent(s3=CONSTANTS.AWS_S3, file_name=CONSTANTS.AWS_FILE)
-    # agent.get_one_data()
+    # data = agent.get_all_data()
+    # print(data)
+    data = agent.get_one_data('SBI')
+    print(data)
