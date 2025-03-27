@@ -39,11 +39,12 @@ async def auth_with_aws_sso(
         
     return result.to_dict()
 
-@router.post("/token/refresh")
+
+@router.post("/token/refresh", tags=['Yet to Complete'])
 async def refresh_auth_token(user_info: Dict[str, Any] = Depends(auth_required)):
     """
     Refresh an authentication token.
-    
+    this should functionally complete. still WIP
     This endpoint allows clients to refresh their authentication token.
     """
     # Get the token from the request
@@ -66,7 +67,7 @@ async def refresh_auth_token(user_info: Dict[str, Any] = Depends(auth_required))
         
     return result.to_dict()
 
-@router.get("/user")
+@router.get("/user", tags=['Yet to Complete'])
 async def get_user_info(user_info: Dict[str, Any] = Depends(auth_required)):
     """
     Get information about the currently authenticated user.
@@ -86,7 +87,7 @@ async def get_user_info(user_info: Dict[str, Any] = Depends(auth_required)):
         **safe_user_info
     }
 
-@router.post("/logout")
+@router.post("/logout",tags=['Yet to Complete'])
 async def logout(user_info: Dict[str, Any] = Depends(auth_required)):
     """
     Logout the current user.

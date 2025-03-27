@@ -145,7 +145,7 @@ async def create_pii_item(
         logger.error(f"Error creating PII item: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
-@router.patch("/", response_model=APIResponse)
+@router.patch("/", response_model=APIResponse,tags=['Yet to Complete'])
 async def update_pii_item(
     request: Request,
     item: PIIItemUpdate,
@@ -187,7 +187,7 @@ async def update_pii_item(
         logger.error(f"Error updating PII item: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
-@router.delete("/", response_model=APIResponse)
+@router.delete("/", response_model=APIResponse,tags=['Yet to Complete'])
 async def delete_pii_item(
     request: Request,
     item: PIIItemDelete,

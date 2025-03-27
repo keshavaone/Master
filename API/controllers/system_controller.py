@@ -55,7 +55,7 @@ async def health_check():
             "error": str(e)
         }
 
-@router.get("/info")
+@router.get("/info",tags=['Yet to Complete'])
 async def system_info(
     request: Request,
     user_info: Dict[str, Any] = Depends(auth_required)
