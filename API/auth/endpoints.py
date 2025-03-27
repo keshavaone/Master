@@ -7,9 +7,9 @@ This module provides FastAPI endpoints for authentication.
 
 from typing import Dict, Any, Optional
 
-from fastapi import APIRouter, Header, Request, HTTPException, status, Depends
+from fastapi import APIRouter, Header, Request, HTTPException, status, Depends, Body
 
-from api.auth.jwt_handler import refresh_token
+from api.auth.jwt_handler import verify_token, blacklist_token
 from api.auth.aws_sso import authenticate_with_aws_credentials
 from api.auth.middleware import auth_required
 
@@ -40,34 +40,7 @@ async def auth_with_aws_sso(
     return result.to_dict()
 
 
-@router.post("/token/refresh", tags=['Yet to Complete'])
-async def refresh_auth_token(user_info: Dict[str, Any] = Depends(auth_required)):
-    """
-    Refresh an authentication token.
-    this should functionally complete. still WIP
-    This endpoint allows clients to refresh their authentication token.
-    """
-    # Get the token from the request
-    token = user_info.get("token")
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No token provided"
-        )
-        
-    # Refresh the token
-    result = refresh_token(token)
-    
-    if not result.success:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=result.error,
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-        
-    return result.to_dict()
-
-@router.get("/user", tags=['Yet to Complete'])
+@router.get("/user", response_model=Dict[str, Any])
 async def get_user_info(user_info: Dict[str, Any] = Depends(auth_required)):
     """
     Get information about the currently authenticated user.
@@ -88,14 +61,65 @@ async def get_user_info(user_info: Dict[str, Any] = Depends(auth_required)):
     }
 
 @router.post("/logout",tags=['Yet to Complete'])
-async def logout(user_info: Dict[str, Any] = Depends(auth_required)):
+async def logout(
+    request: Request,
+    authorization: str = Header(None),
+    refresh_token: str = Body(None, embed=True)
+):
     """
-    Logout the current user.
+    Logout the current user by invalidating their tokens.
     
-    This endpoint allows clients to logout.
+    This endpoint invalidates the access token and optionally the refresh token
+    to prevent their future use.
+    
+    Args:
+        authorization: The authorization header containing the access token
+        refresh_token: The refresh token to invalidate (optional)
+        
+    Returns:
+        Dict: Logout result
     """
+    client_ip = request.client.host if request.client else "unknown"
+    user_id = "unknown"
+    tokens_revoked = 0
+    
+    # Extract the access token from the authorization header
+    access_token = None
+    if authorization:
+        parts = authorization.split()
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            access_token = parts[1]
+    
+    # Invalidate the access token if provided
+    if access_token:
+        # Validate the token to get the user ID
+        success, payload = verify_token(access_token)
+        if success and payload:
+            user_id = payload.get("sub", "unknown")
+            
+        # Blacklist the token regardless of validation result
+        if blacklist_token(access_token):
+            tokens_revoked += 1
+            # logger.info(f"Access token revoked for user {user_id} from {client_ip}")
+    
+    # Invalidate the refresh token if provided
+    if refresh_token:
+        # Validate the refresh token to confirm user ID
+        success, payload = verify_token(refresh_token)
+        if success and payload:
+            token_user_id = payload.get("sub")
+            if token_user_id:
+                user_id = token_user_id
+        
+        # Blacklist the refresh token
+        if blacklist_token(refresh_token):
+            tokens_revoked += 1
+            # logger.info(f"Refresh token revoked for user {user_id} from {client_ip}")
+    
     return {
+        "success": True,
         "message": "Logout successful",
-        "user_id": user_info.get("sub"),
+        "user_id": user_id,
+        "tokens_revoked": tokens_revoked
     }
 

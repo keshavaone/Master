@@ -55,7 +55,7 @@ async def health_check():
             "error": str(e)
         }
 
-@router.get("/info",tags=['Yet to Complete'])
+@router.get("/info")
 async def system_info(
     request: Request,
     user_info: Dict[str, Any] = Depends(auth_required)
@@ -71,7 +71,7 @@ async def system_info(
         Dict: System information
     """
     # Check if user is admin
-    if user_info.get("sub") != "admin" and not user_info.get("arn", "").endswith("/Admin"):
+    if user_info.get("sub") != "AIDA34ROTQD3B6UZMLARI" and not user_info.get("arn", "").endswith("/Admin"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required for this endpoint"

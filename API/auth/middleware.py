@@ -1,4 +1,3 @@
-
 # api/auth/middleware.py
 """
 FastAPI middleware for authentication.
@@ -91,7 +90,8 @@ class AuthDependency(HTTPBearer):
                     "arn": identity.get("Arn", ""),
                     "account": identity.get("Account", ""),
                     "auth_type": "aws_sso",
-                    "exp": time.time() + 3600  # 1 hour expiration
+                    "exp": time.time() + 3600,  # 1 hour expiration
+                    "token": token  # Add the token to user_info
                 }
                 
                 logger.info(f"Successfully authenticated with AWS credentials for user {user_info.get('sub', 'unknown')}")
@@ -115,7 +115,8 @@ class AuthDependency(HTTPBearer):
                     user_info = {
                         "sub": "aws-user",
                         "auth_type": "aws_sso",
-                        "exp": time.time() + 3600  # 1 hour expiration
+                        "exp": time.time() + 3600,  # 1 hour expiration
+                        "token": token  # Add the token to user_info
                     }
                 else:
                     # Try to validate the token with AWS STS
@@ -130,6 +131,7 @@ class AuthDependency(HTTPBearer):
             success, payload = verify_token(token)
             if success and payload:
                 user_info = payload
+                user_info["token"] = token  # Add the token to user_info
                 
         if not user_info:
             raise HTTPException(

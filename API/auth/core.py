@@ -40,18 +40,9 @@ class AuthSettings:
                 return False
         
         return True
-
 class AuthResult:
     """
     Class representing the result of an authentication operation.
-    
-    Attributes:
-        success (bool): Whether authentication was successful
-        user_id (str): User ID if authentication was successful
-        token (str): Authentication token if generated
-        expires_at (float): Token expiration timestamp
-        error (str): Error message if authentication failed
-        auth_type (str): Type of authentication used
     """
     def __init__(
         self, 
@@ -59,6 +50,8 @@ class AuthResult:
         user_id: str = None,
         token: str = None,
         expires_at: float = None,
+        refresh_token: str = None,
+        refresh_expires_at: float = None,
         error: str = None,
         auth_type: str = None,
         user_info: Dict[str, Any] = None
@@ -67,6 +60,8 @@ class AuthResult:
         self.user_id = user_id
         self.token = token
         self.expires_at = expires_at
+        self.refresh_token = refresh_token
+        self.refresh_expires_at = refresh_expires_at
         self.error = error
         self.auth_type = auth_type
         self.user_info = user_info or {}
@@ -89,6 +84,15 @@ class AuthResult:
                 "expires_in": expires_in
             })
         
+        if self.refresh_token:
+            # Calculate refresh_expires_in for client (in seconds)
+            refresh_expires_in = int(self.refresh_expires_at - time.time()) if self.refresh_expires_at else None
+            
+            result.update({
+                "refresh_token": self.refresh_token,
+                "refresh_expires_in": refresh_expires_in
+            })
+        
         if self.error:
             result["error"] = self.error
             
@@ -98,7 +102,7 @@ class AuthResult:
                 if key not in result and not key.lower() in ["password", "secret", "key"]:
                     result[key] = value
                     
-        return result
+        return result    
 
 def get_auth_headers(token: str, auth_type: str = None) -> Dict[str, str]:
     """
