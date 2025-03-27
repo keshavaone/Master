@@ -28,16 +28,11 @@ from PyQt5.QtWidgets import (
     QStatusBar, QProgressDialog
 )
 from UI.Desktop.session_manager import SessionManager
-from API.auth_service import EnhancedAuthService as AuthService
 from PyQt5.QtGui import QIcon, QCursor, QGuiApplication
 from PyQt5.QtCore import Qt, QTimer, QDateTime
 from UI.Desktop.modern_components import ModernButton, SessionStatusWidget, ModernDataDialog, CRUDHelper, DataItemEditDialog
 
-# Local application imports
-from API.Backend import Agent
-from API.youtube_download import YouTubeDownloaderWidget
-from API.Assistant import Assistant
-import API.CONSTANTS as CONSTANTS
+import api.CONSTANTS as CONSTANTS
 
 # Setup logging with rotation
 handler = RotatingFileHandler(
@@ -484,20 +479,6 @@ class PIIWindow(QMainWindow):
 
         # Add the PII tab to tab widget
         self.tab_widget.addTab(self.pii_tab, "PII Data Management")
-
-        # Create and add YouTube Downloader tab
-        if not hasattr(self, 'downloader_widget'):
-            self.downloader_widget = YouTubeDownloaderWidget(
-                parent=self,
-                log_callback=lambda msg: self.update_log(
-                    self.assistant.get_current_time() if hasattr(self, 'assistant') and self.assistant is not None else
-                    QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss"),
-                    f"YouTube Downloader: {msg}"
-                ) if hasattr(self, 'update_log') else None
-            )
-
-        # Add YouTube downloader tab
-        self.tab_widget.addTab(self.downloader_widget, "YouTube Downloader")
 
         # Set YouTube downloader as the default tab
         self.tab_widget.setCurrentIndex(1)
@@ -1931,16 +1912,6 @@ class PIIWindow(QMainWindow):
 
         try:
             # Import the new authentication solution
-            from API.complete_auth_solution import AuthService
-
-            # Initialize the auth service
-            self.auth_service = AuthService(CONSTANTS.API_BASE_URL)
-
-            # Create agent with session token
-            self.agent = Agent(
-                file_name=CONSTANTS.AWS_FILE
-            )
-            self.assistant = Assistant(CONSTANTS.AWS_S3)
 
             # Complete connection process
             self.connect_after_authentication()
@@ -2087,11 +2058,7 @@ class PIIWindow(QMainWindow):
                 self.session_manager = SessionManager(self)
 
             # Initialize the authentication service if not already done
-            if not hasattr(self, 'auth_service'):
-                self.auth_service = AuthService(
-                    api_base_url=CONSTANTS.API_BASE_URL,
-                    session_manager=self.session_manager
-                )
+            
 
             # First try AWS SSO authentication if it's available
             aws_sso_available = False
@@ -2121,9 +2088,7 @@ class PIIWindow(QMainWindow):
                     raise ValueError(
                         f"Password authentication failed: {message}")
 
-            self.agent = Agent(CONSTANTS.AWS_FILE)
             
-            self.assistant = Assistant(CONSTANTS.AWS_S3)
             # Update UI to reflect successful connection
             # self.password_input.setVisible(False)
             self.btn_connect_server.setVisible(False)

@@ -13,7 +13,7 @@ import requests
 import traceback
 from typing import Dict, Any, Tuple, List, Union
 from urllib.parse import urljoin
-import API.CONSTANTS as CONSTANTS
+import api.CONSTANTS as CONSTANTS
 
 # Configure logging
 logger = logging.getLogger("api_client")

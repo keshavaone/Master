@@ -1,0 +1,327 @@
+"""
+PII data controller.
+
+This module provides FastAPI endpoints for managing PII data.
+"""
+
+import logging
+from typing import Dict, Any, List, Union
+
+from fastapi import APIRouter, Depends, HTTPException, status, Request, BackgroundTasks
+
+from api.auth.middleware import auth_required
+from api.data.models import (
+    PIIItemCreate, PIIItemUpdate, PIIItemDelete, PIIItemResponse, 
+    PIISearchParams, APIResponse
+)
+from api.data.database import DatabaseHandler
+
+# Configure logging
+logger = logging.getLogger("api.controllers.pii")
+logger.setLevel(logging.INFO)
+
+# Create router
+router = APIRouter(prefix="/pii", tags=["PII Data"])
+
+# Create database handler
+db_handler = DatabaseHandler()
+
+@router.get("/filter", response_model=List[PIIItemResponse])
+async def get_filtered_pii_data(
+    request: Request,
+    category: str = None,
+    type: str = None,
+    user_info: Dict[str, Any] = Depends(auth_required)
+):
+    """
+    Get a single PII data entry by Type or Category.
+    
+    This endpoint returns a single PII data entry matching the specified Type or Category.
+    If both are provided, both conditions must match.
+    
+    Args:
+        request: The HTTP request
+        category: Optional category to filter by
+        type: Optional type to filter by
+        user_info: User information from authentication
+        
+    Returns:
+        PIIItemResponse: A single PII data entry
+    """
+    try:
+        # Get client IP for audit logging
+        client_ip = request.client.host if request.client else "unknown"
+        
+        # Check that at least one filter parameter is provided
+        if not category and not type:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, 
+                detail="At least one filter parameter (category or type) must be provided"
+            )
+        
+        # Log the request
+        logger.info(f"Getting filtered PII data for user: {user_info.get('sub')} from {client_ip}")
+        logger.info(f"Filter parameters: category={category}, type={type}")
+        
+        # Get all items from the database
+        success, items = db_handler.get_all_items()
+        
+        if not success:
+            # Handle database error
+            logger.error(f"Database error: {items}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
+        
+        # Apply filters
+        filtered_items = items
+        
+        if category:
+            filtered_items = [item for item in filtered_items if item.get('Category') == category]
+            
+        if type:
+            filtered_items = [item for item in filtered_items if item.get('Type') == type]
+        
+        if not filtered_items:
+            # No matching items found
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, 
+                detail="No matching PII data found"
+            )
+        
+        # Get the first matching item
+        filtered_data = []
+        for item in filtered_items:
+            # Decrypt the item
+            success, decrypted_item = db_handler.decrypt_item(item)
+            if success:
+                # Convert to response model
+                try:
+                    response_item = PIIItemResponse(
+                        _id=decrypted_item.get('_id'),
+                        category=decrypted_item.get('Category'),
+                        type=decrypted_item.get('Type'),
+                        pii=decrypted_item.get('PII')
+                    )
+                    filtered_data.append(response_item)
+                except Exception as e:
+                    logger.error(f"Failed to convert item to response model: {e}")
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+                        detail="Failed to process PII data"
+                    )
+            else:
+                # Failed to decrypt
+                logger.error(f"Failed to decrypt item: {item.get('_id')}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+                    detail="Failed to decrypt PII data"
+                )
+        return filtered_data
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        # Log and convert other exceptions to HTTP exceptions
+        logger.error(f"Error retrieving filtered PII data: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
+
+@router.get("/", response_model=List[PIIItemResponse])
+async def get_all_pii_data(
+    request: Request,
+    search_params: PIISearchParams = Depends(),
+    user_info: Dict[str, Any] = Depends(auth_required)
+):
+    """
+    Get all PII data with optional filtering.
+    """
+    try:
+        # Get client IP for audit logging
+        client_ip = request.client.host if request.client else "unknown"
+        
+        # Log the request
+        logger.info(f"Getting PII data for user: {user_info.get('sub')} from {client_ip}")
+        
+        # Get all items from the database
+        success, items = db_handler.get_all_items()
+        
+        if not success:
+            # Handle database error
+            logger.error(f"Database error: {items}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
+        if search_params.category or search_params.type or search_params.search:
+            # Filter items if search parameters are provided
+            if search_params.category:
+                items = [item for item in items if item.get('Category') == search_params.category]
+            
+            if search_params.type:
+                items = [item for item in items if item.get('Type') == search_params.type]
+            
+            if search_params.search:
+                # Simple search - in a real application you'd want better search capabilities
+                search_term = search_params.search.lower()
+                items = [
+                    item for item in items if 
+                    search_term in item.get('Category', '').lower() or
+                    search_term in item.get('Type', '').lower()
+                ]
+        else:
+            # If no search parameters, return all items
+            items = items
+        # Decrypt items
+        decrypted_items = []
+        for item in items:
+            success, decrypted_item = db_handler.decrypt_item(item)
+            if success:
+                decrypted_items.append(decrypted_item)
+            else:
+                # Log decryption error but continue with other items
+                logger.warning(f"Failed to decrypt item: {item.get('_id')}")
+        
+        # Convert to response model
+        response_items = []
+        for item in decrypted_items:
+            try:
+                response_items.append(
+                    PIIItemResponse(
+                        _id=item.get('_id'),
+                        category=item.get('Category'),
+                        type=item.get('Type'),
+                        pii=item.get('PII')
+                    )
+                )
+            except Exception as e:
+                logger.warning(f"Failed to convert item to response model: {e}")
+        
+        return response_items
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        # Log and convert other exceptions to HTTP exceptions
+        logger.error(f"Error getting PII data: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
+
+@router.post("/", response_model=APIResponse)
+async def create_pii_item(
+    request: Request,
+    item: PIIItemCreate,
+    user_info: Dict[str, Any] = Depends(auth_required)
+):
+    """
+    Create a new PII data item.
+    """
+    try:
+        # Get client IP for audit logging
+        client_ip = request.client.host if request.client else "unknown"
+        
+        # Log the request
+        logger.info(f"Creating PII item for user: {user_info.get('sub')} from {client_ip}")
+        
+        # Create the item
+        success, result = db_handler.create_item(
+            item=item,
+            user_id=user_info.get('sub'),
+            auth_type=user_info.get('auth_type', 'unknown')
+        )
+        
+        if not success:
+            # Handle database error
+            logger.error(f"Database error: {result}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
+        
+        # Return success response
+        return APIResponse(
+            success=True,
+            message="PII item created successfully",
+            data={"item_id": result.get('_id')}
+        )
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        # Log and convert other exceptions to HTTP exceptions
+        logger.error(f"Error creating PII item: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
+
+@router.patch("/", response_model=APIResponse)
+async def update_pii_item(
+    request: Request,
+    item: PIIItemUpdate,
+    user_info: Dict[str, Any] = Depends(auth_required)
+):
+    """
+    Update an existing PII data item.
+    """
+    try:
+        # Get client IP for audit logging
+        client_ip = request.client.host if request.client else "unknown"
+        
+        # Log the request
+        logger.info(f"Updating PII item for user: {user_info.get('sub')} from {client_ip}")
+        
+        # Update the item
+        success, result = db_handler.update_item(
+            item=item,
+            user_id=user_info.get('sub'),
+            auth_type=user_info.get('auth_type', 'unknown')
+        )
+        
+        if not success:
+            # Handle database error
+            logger.error(f"Database error: {result}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
+        
+        # Return success response
+        return APIResponse(
+            success=True,
+            message="PII item updated successfully",
+            data={"item_id": result.get('_id')}
+        )
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        # Log and convert other exceptions to HTTP exceptions
+        logger.error(f"Error updating PII item: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
+
+@router.delete("/", response_model=APIResponse)
+async def delete_pii_item(
+    request: Request,
+    item: PIIItemDelete,
+    user_info: Dict[str, Any] = Depends(auth_required)
+):
+    """
+    Delete a PII data item.
+    """
+    try:
+        # Get client IP for audit logging
+        client_ip = request.client.host if request.client else "unknown"
+        
+        # Log the request
+        logger.info(f"Deleting PII item for user: {user_info.get('sub')} from {client_ip}")
+        
+        # Delete the item
+        success, result = db_handler.delete_item(
+            item=item,
+            user_id=user_info.get('sub'),
+            auth_type=user_info.get('auth_type', 'unknown')
+        )
+        
+        if not success:
+            # Handle database error
+            logger.error(f"Database error: {result}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
+        
+        # Return success response
+        return APIResponse(
+            success=True,
+            message="PII item deleted successfully",
+            data={"item_id": item.id}
+        )
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        # Log and convert other exceptions to HTTP exceptions
+        logger.error(f"Error deleting PII item: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")

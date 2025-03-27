@@ -9,7 +9,7 @@ import json
 import logging
 from typing import Tuple
 from PyQt5.QtWidgets import QMessageBox
-import API.CONSTANTS as CONSTANTS
+import api.CONSTANTS as CONSTANTS
 
 class AuthenticationManager:
     """
