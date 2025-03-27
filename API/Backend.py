@@ -52,16 +52,15 @@ class Agent:
         if self.__secret is not None:
             # Initialize S3 - ensure we're using the original key fetching method
             # that was working before
-            self.__encoded_key = self.__secret['S3_KEY_ID']
-            assert self.__encoded_key is not None, "S3 key not found in secrets"
-            self.s3 = boto3.client('s3', region_name="us-east-1",
-                                          aws_access_key_id=self.__secret['S3_ACCESS_KEY_ID'],
-                                          aws_secret_access_key=self.__secret['S3_SECRET_ACCESS_KEY_ID'])
+            self.s3 = self.__secret['S3_BUCKET_NAME']
+            assert self.s3 is not None, "S3 key not found in secrets"
+            self.s3_client = boto3.client('s3', region_name="us-east-1")
             print('S3 Client Initialized Successfully')
 
             # DynamoDB setup
             dynamodb = boto3.resource('dynamodb', region_name="us-east-1")
-            table_name = "myPII"
+            table_name = self.__secret['DYNAMODB_TABLE_NAME']
+            assert table_name is not None, "DynamoDB table name not found in secrets"
             self.collection = dynamodb.Table(table_name)
             self.__df = self.refresh_data()
 
@@ -799,9 +798,8 @@ class Agent:
                 
             # Upload to S3 for secure storage
             if self.s3:
-                s3_client = boto3.client('s3')
                 s3_key = f"audit_logs/{os.path.basename(file_path)}"
-                s3_client.upload_file(file_path, self.s3, s3_key)
+                self.s3_client.upload_file(file_path, self.s3, s3_key)
                 
                 # Log the S3 upload
                 self._log_security_event(

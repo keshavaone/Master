@@ -639,58 +639,10 @@ async def agent_status(user_and_agent=Depends(get_current_user_with_agent)):
         "timestamp": datetime.now().isoformat()
     }
 
-# Initialize compatibility module
-@app.on_event("startup")
-async def initialize_compatibility_module():
-    """Initialize the compatibility module for legacy code."""
-    # Import and initialize the compatibility module
-    try:
-        from API.agent_compatibility import initialize_global_agent_reference
-        # Pass a reference to our global_agent variable
-        initialize_global_agent_reference(global_agent)
-        logger.info("Compatibility module initialized")
-    except ImportError:
-        logger.warning("Could not import compatibility module - may need to create it")
-    except Exception as e:
-        logger.error(f"Error initializing compatibility module: {str(e)}")
-
-# Cleanup job to periodically remove inactive agents
-@app.on_event("startup")
-async def schedule_agent_cleanup():
-    """Schedule a background task to clean up inactive agents."""
-    async def cleanup_inactive_agents():
-        while True:
-            try:
-                # Sleep for 30 minutes
-                await asyncio.sleep(30 * 60)
-                
-                # Get current time
-                current_time = time.time()
-                
-                # Find inactive agents to clean up
-                to_remove = []
-                
-                async with user_agent_lock:
-                    for user_id, agent in user_agents.items():
-                        # Check if agent has been inactive for too long (2 hours)
-                        if hasattr(agent, 'last_activity_time') and current_time - agent.last_activity_time > 2 * 60 * 60:
-                            to_remove.append(user_id)
-                
-                # Clean up each inactive agent
-                for user_id in to_remove:
-                    await cleanup_agent(user_id)
-                    
-                logger.info(f"Cleaned up {len(to_remove)} inactive agents")
-                
-            except Exception as e:
-                logger.error(f"Error in agent cleanup task: {str(e)}")
-    
-    # Start the background task
-    asyncio.create_task(cleanup_inactive_agents())
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
-    # agent = Agent(s3=CONSTANTS.AWS_S3, file_name=CONSTANTS.AWS_FILE)
+    # agent = Agent(file_name=CONSTANTS.AWS_FILE)
     # print(agent.get_all_data())    
     
     
