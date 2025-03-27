@@ -1938,7 +1938,6 @@ class PIIWindow(QMainWindow):
 
             # Create agent with session token
             self.agent = Agent(
-                s3=CONSTANTS.AWS_S3,
                 file_name=CONSTANTS.AWS_FILE
             )
             self.assistant = Assistant(CONSTANTS.AWS_S3)
@@ -2122,11 +2121,8 @@ class PIIWindow(QMainWindow):
                     raise ValueError(
                         f"Password authentication failed: {message}")
 
-            # Create agent with session token
-            self.agent = Agent(
-                s3=CONSTANTS.AWS_S3,
-                file_name=CONSTANTS.AWS_FILE
-            )
+            self.agent = Agent(CONSTANTS.AWS_FILE)
+            
             self.assistant = Assistant(CONSTANTS.AWS_S3)
             # Update UI to reflect successful connection
             # self.password_input.setVisible(False)

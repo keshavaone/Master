@@ -190,7 +190,7 @@ async def get_or_create_agent(user_id: str, user_info: dict = None) -> Agent:
         # Initialize the agent with AWS resources
         # Use run_in_threadpool to avoid blocking the event loop with synchronous code
         agent = await run_in_threadpool(
-            lambda: Agent(s3=CONSTANTS.AWS_S3, file_name=CONSTANTS.AWS_FILE)
+            lambda: Agent(file_name=CONSTANTS.AWS_FILE)
         )
         
         # Create auth context with more detailed info from user_info
@@ -690,3 +690,7 @@ async def schedule_agent_cleanup():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+    # agent = Agent(s3=CONSTANTS.AWS_S3, file_name=CONSTANTS.AWS_FILE)
+    # print(agent.get_all_data())    
+    
+    

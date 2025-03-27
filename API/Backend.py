@@ -29,7 +29,6 @@ class Agent:
         stored_file_names (list): List of stored file names
         auth_context (dict): Authentication context for tracking operations
     """
-    s3: str
     file_name: str
     input_path: str = 'ReQuest.txt'
     session_token: str = None
@@ -43,11 +42,22 @@ class Agent:
         self.data_path = self.file_name
         self.operation_id = str(uuid.uuid4())  # Track operation ID for audit
 
-        self.status = {'Waking Up Mr.Agent...'}
         try:
             # Get secrets
             self.__secret = ast.literal_eval(get_secret())
-            print('Secrets Fetched')
+        except Exception as e:
+            print(f"Error fetching secrets: {e}")
+            raise
+
+        if self.__secret is not None:
+            # Initialize S3 - ensure we're using the original key fetching method
+            # that was working before
+            self.__encoded_key = self.__secret['S3_KEY_ID']
+            assert self.__encoded_key is not None, "S3 key not found in secrets"
+            self.s3 = boto3.client('s3', region_name="us-east-1",
+                                          aws_access_key_id=self.__secret['S3_ACCESS_KEY_ID'],
+                                          aws_secret_access_key=self.__secret['S3_SECRET_ACCESS_KEY_ID'])
+            print('S3 Client Initialized Successfully')
 
             # DynamoDB setup
             dynamodb = boto3.resource('dynamodb', region_name="us-east-1")
@@ -62,16 +72,13 @@ class Agent:
             self.kms_client = KMS()
             self.cipher_suite = self.kms_client.decrypt_my_key(self.__encoded_key)
             print('KMS Key Decrypted Successfully')
-
             # Register cleanup handler
             atexit.register(self.end_work)
             self.chosen_one = None  # Initialize chosen_one attribute
             
             # Initialize security audit trail
             self.audit_trail = []
-        except Exception as e:
-            print(f"Error in agent initialization: {e}")
-            raise
+       
         
     def set_auth_context(self, user_id: str, auth_type: str, client_ip: str = None):
         """
@@ -145,31 +152,8 @@ class Agent:
             print(f"Error fetching key: {e}")
             raise
 
-    def filter_from_db(self, item_name=None, download_request=False):
-        """
-        Filter data from the database.
-
-        Args:
-            item_name (str, optional): Name of the item to filter
-            download_request (bool, optional): Flag for download requests
-
-        Returns:
-            bytes or int: Filtered data or 0 for download requests
-        """
-        if download_request:
-            return 0
-        elif item_name is not None:
-            filtered_df = self.__df[self.__df['Type'] == item_name]
-
-            # Check if the filtered DataFrame is not empty
-            if not filtered_df.empty:
-                data = base64.b64decode(filtered_df['PII'].values[0])
-                return data
-            else:
-                # Handle the case where no matching item is found
-                print(f"No data found for item_name: {item_name}")
-                return None
-
+    
+    
     def process_request(self):
         """
         Process an input request.
@@ -193,7 +177,241 @@ class Agent:
         print('Processed: ', input_request)
         os.remove(self.input_path)
         return output  # Added return statement
+    
+    def filter_from_db(self, item_name=None, download_request=False):
+        """
+        Filter data from the database with enhanced error handling.
 
+        Args:
+            item_name (str, optional): Name of the item to filter
+            download_request (bool, optional): Flag for download requests
+
+        Returns:
+            bytes or int: Filtered data or 0 for download requests
+        """
+        if download_request:
+            return 0
+        elif item_name is not None:
+            try:
+                # Make sure we have the latest data
+                try:
+                    if self.__df is None or self.__df.empty:
+                        self.__df = self.refresh_data()
+                except Exception as refresh_error:
+                    self._log_security_event(
+                        "DATA_REFRESH_ERROR", 
+                        f"Error refreshing data: {str(refresh_error)}"
+                    )
+                    # Continue with existing data if refresh fails
+                
+                # Ensure DataFrame exists and has the right columns
+                if self.__df is None or not isinstance(self.__df, pd.DataFrame):
+                    self._log_security_event(
+                        "DATA_ACCESS_ERROR", 
+                        f"Invalid DataFrame: {type(self.__df)}"
+                    )
+                    return None
+                    
+                if 'Type' not in self.__df.columns or 'PII' not in self.__df.columns:
+                    self._log_security_event(
+                        "DATA_FORMAT_ERROR", 
+                        f"Missing required columns. Available: {list(self.__df.columns)}"
+                    )
+                    return None
+                
+                # Filter for the requested item
+                filtered_df = self.__df[self.__df['Type'] == item_name]
+
+                # Check if the filtered DataFrame is not empty
+                if not filtered_df.empty:
+                    try:
+                        # Get the PII data
+                        pii_data = filtered_df['PII'].values[0]
+                        
+                        # Handle different potential formats
+                        if isinstance(pii_data, bytes):
+                            return pii_data
+                        elif isinstance(pii_data, str):
+                            # Check if it's base64 encoded
+                            if self.kms_client.is_base64(pii_data):
+                                try:
+                                    # Fix potential padding issues
+                                    padded_data = self.kms_client._fix_base64_padding(pii_data)
+                                    return base64.b64decode(padded_data)
+                                except Exception as decode_error:
+                                    self._log_security_event(
+                                        "BASE64_DECODE_ERROR", 
+                                        f"Error decoding base64 for {item_name}: {str(decode_error)}"
+                                    )
+                                    # Return as-is if decode fails
+                                    return pii_data.encode('utf-8')
+                            else:
+                                # Not base64, return as bytes
+                                return pii_data.encode('utf-8')
+                        else:
+                            # Convert other types to string then bytes
+                            self._log_security_event(
+                                "UNEXPECTED_TYPE", 
+                                f"Unexpected PII data type for {item_name}: {type(pii_data)}"
+                            )
+                            return str(pii_data).encode('utf-8')
+                            
+                    except Exception as e:
+                        self._log_security_event(
+                            "DATA_ACCESS_ERROR", 
+                            f"Error processing PII data for {item_name}: {str(e)}"
+                        )
+                        return None
+                else:
+                    # Handle the case where no matching item is found
+                    self._log_security_event(
+                        "ITEM_NOT_FOUND", 
+                        f"No data found for item_name: {item_name}"
+                    )
+                    return None
+            except Exception as e:
+                self._log_security_event(
+                    "FILTER_ERROR", 
+                    f"Error in filter_from_db for {item_name}: {str(e)}"
+                )
+                return None
+    
+    def decrypt_data(self, data):
+        """
+        Decrypt data using KMS with robust error handling and recovery.
+
+        Args:
+            data (bytes or str): Data to decrypt
+
+        Returns:
+            str: Decrypted data or None if decryption fails
+        """
+        if not data:
+            self._log_security_event(
+                "DECRYPT_ERROR", 
+                "Cannot decrypt None or empty data"
+            )
+            return None
+        
+        try:
+            # Ensure KMS client is available
+            if not hasattr(self, 'kms_client') or not self.kms_client:
+                self._log_security_event(
+                    "DECRYPT_ERROR", 
+                    "KMS client not initialized"
+                )
+                return None
+            
+            # Try to repair data if needed
+            try:
+                # If data is str and looks like base64, decode it first
+                if isinstance(data, str) and self.kms_client.is_base64(data):
+                    padded_data = self.kms_client._fix_base64_padding(data)
+                    data = base64.b64decode(padded_data)
+            except Exception as repair_error:
+                self._log_security_event(
+                    "DATA_REPAIR_ATTEMPT", 
+                    f"Failed to repair data: {repair_error}"
+                )
+                # Continue with original data if repair fails
+            
+            # Try different decryption methods based on what's available
+            decrypted = None
+            decrypt_error = None
+            
+            # First try the enhanced decrypt method if available
+            if hasattr(self.kms_client, 'decrypt'):
+                try:
+                    decrypted_bytes = self.kms_client.decrypt(data)
+                    if decrypted_bytes:
+                        if isinstance(decrypted_bytes, str):
+                            return decrypted_bytes
+                        else:
+                            try:
+                                return decrypted_bytes.decode('utf-8')
+                            except UnicodeDecodeError:
+                                # Try different encodings if UTF-8 fails
+                                return decrypted_bytes.decode('latin-1')
+                except Exception as e:
+                    decrypt_error = f"Enhanced decrypt failed: {str(e)}"
+                    # Continue to next method if this fails
+            
+            # Fall back to legacy decrypt_data method if enhanced method failed or isn't available
+            if not decrypted and hasattr(self.kms_client, 'decrypt_data'):
+                try:
+                    decrypted = self.kms_client.decrypt_data(data)
+                except Exception as e:
+                    if decrypt_error:
+                        decrypt_error += f"; Legacy decrypt failed: {str(e)}"
+                    else:
+                        decrypt_error = f"Legacy decrypt failed: {str(e)}"
+            
+            # If both methods failed, try a direct approach as last resort
+            if not decrypted and self.kms_client.cipher_suite:
+                try:
+                    # Ensure data is in bytes format
+                    if isinstance(data, str):
+                        try:
+                            # Try to decode base64 if it looks like base64
+                            padded_data = self.kms_client._fix_base64_padding(data)
+                            data = base64.b64decode(padded_data)
+                        except:
+                            # If not base64, encode as UTF-8 bytes
+                            data = data.encode('utf-8')
+                    
+                    # Direct decryption with Fernet
+                    decrypted_bytes = self.kms_client.cipher_suite.decrypt(data)
+                    if decrypted_bytes:
+                        try:
+                            return decrypted_bytes.decode('utf-8')
+                        except UnicodeDecodeError:
+                            # Try different encodings if UTF-8 fails
+                            return decrypted_bytes.decode('latin-1')
+                except Exception as e:
+                    if decrypt_error:
+                        decrypt_error += f"; Direct decrypt failed: {str(e)}"
+                    else:
+                        decrypt_error = f"Direct decrypt failed: {str(e)}"
+            
+            # Log failure if all methods failed
+            if not decrypted:
+                self._log_security_event(
+                    "DECRYPT_FAILED", 
+                    decrypt_error or "All decryption methods failed"
+                )
+            
+            return decrypted
+            
+        except Exception as e:
+            self._log_security_event(
+                "DECRYPT_ERROR", 
+                f"Unexpected error in decrypt_data: {str(e)}"
+            )
+            return None
+    def get_all_data(self):
+        """
+        Get all data with improved decryption and robust error handling.
+
+        Returns:
+            List[Dict]: All decrypted data as a list of dictionaries
+        """
+        df = self.refresh_data()
+        if df is None or df.empty:
+            return []
+        data = []
+        # self.decrypt_data(base64.b64decode(return_item['PII']))
+        for index, row in df.iterrows():
+            item = {
+                'Category': row['Category'],
+                'Type': row['Type']
+            }
+            try:
+                item['PII'] = self.decrypt_data(base64.b64decode(row['PII']))
+            except Exception as e:
+                item['PII'] = f"Error decrypting data: {str(e)}"
+            data.append(item)
+        return data
+    
     def read_excel_from_file(self, file_path):
         """
         Read Excel data from a file.
@@ -242,106 +460,7 @@ class Agent:
         """
         return pd.DataFrame(self.collection.scan()['Items'])
 
-    def get_all_data(self):
-        """
-        Get all data with decryption and error handling.
-
-        Returns:
-            List[Dict]: All decrypted data as a list of dictionaries
-        """
-        try:
-            # Get data from DynamoDB
-            df = self.refresh_data()
-            
-            # Store a copy for later use
-            self.__df = df.copy()
-            
-            # If DataFrame is empty, return empty list
-            if df.empty:
-                self._log_security_event(
-                    "DATA_RETRIEVAL_WARNING", 
-                    "Retrieved empty dataset from DynamoDB"
-                )
-                return []
-            
-            # Process each row
-            for i in df.index:
-                try:
-                    if df.loc[i, 'Type'] == 'KeyID':
-                        # Skip key IDs as they don't need decryption
-                        pass
-                    else:
-                        # Handle KeyPassword with special care
-                        if df.loc[i, 'Type'] == 'KeyPassword':
-                            try:
-                                # Special handling for KeyPassword
-                                encrypted_data = self.filter_from_db(df.loc[i, 'Type'])
-                                if encrypted_data:
-                                    decrypted = self.decrypt_data(encrypted_data)
-                                    df.loc[i, 'PII'] = decrypted or "Could not decrypt key password - please reset"
-                                else:
-                                    df.loc[i, 'PII'] = "Key password data not found"
-                            except Exception as key_error:
-                                self._log_security_event(
-                                    "KEY_PASSWORD_DECRYPTION_ERROR", 
-                                    f"Error with key password: {str(key_error)}"
-                                )
-                                df.loc[i, 'PII'] = "Error in key password - system may need maintenance"
-                        else:
-                            # Regular decryption for other types
-                            try:
-                                encrypted_data = self.filter_from_db(df.loc[i, 'Type'])
-                                if encrypted_data:
-                                    decrypted = self.decrypt_data(encrypted_data)
-                                    if decrypted:
-                                        df.loc[i, 'PII'] = decrypted
-                                    else:
-                                        df.loc[i, 'PII'] = "Data could not be decrypted"
-                                else:
-                                    df.loc[i, 'PII'] = "No data found for this type"
-                            except Exception as e:
-                                self._log_security_event(
-                                    "DATA_DECRYPTION_ERROR", 
-                                    f"Error decrypting data for Type={df.loc[i, 'Type']}: {str(e)}"
-                                )
-                                df.loc[i, 'PII'] = 'Data may have been inserted in the current session. Please restart to see this entry'
-                except Exception as row_error:
-                    # Handle errors for individual rows without failing the entire operation
-                    self._log_security_event(
-                        "ROW_PROCESSING_ERROR", 
-                        f"Error processing row {i}: {str(row_error)}"
-                    )
-                    # Try to provide as much info as possible about the problematic row
-                    try:
-                        row_type = df.loc[i, 'Type'] if 'Type' in df.columns and i < len(df) else "unknown"
-                        self._log_security_event(
-                            "ROW_DATA", 
-                            f"Problem row type: {row_type}"
-                        )
-                    except:
-                        pass
-                    
-                    # Keep going with other rows
-                    continue
-            
-            # Convert DataFrame to list of dictionaries for API response
-            result = df.to_dict(orient='records')
-            
-            # Log success
-            self._log_security_event(
-                "DATA_RETRIEVAL_SUCCESS", 
-                f"Successfully retrieved and processed {len(result)} records"
-            )
-            
-            return result
-            
-        except Exception as e:
-            self._log_security_event(
-                "DATA_RETRIEVAL_ERROR", 
-                f"Error retrieving data: {str(e)}"
-            )
-            # Return empty list on error
-            return []
+    
 
     def get_one_data(self,type_value):
         """
@@ -1050,43 +1169,7 @@ class Agent:
             print(f"Error uploading file to S3: {e}")
             return False
 
-    def decrypt_data(self, data):
-        """
-        Decrypt data using KMS with method name compatibility.
-
-        Args:
-            data (bytes): Data to decrypt
-
-        Returns:
-            str: Decrypted data
-        """
-        try:
-            if not hasattr(self, 'kms_client') or not self.kms_client or not data:
-                print("Unable to decrypt: missing KMS client or data")
-                return None
-            
-            # Check which method is available in the KMS client and use it
-            if hasattr(self.kms_client, 'decrypt_data'):
-                # Use legacy method
-                decrypted = self.kms_client.decrypt_data(data)
-            elif hasattr(self.kms_client, 'decrypt'):
-                # Use enhanced method
-                decrypted_bytes = self.kms_client.decrypt(data)
-                # Convert bytes to string if the method returns bytes
-                if isinstance(decrypted_bytes, bytes):
-                    decrypted = decrypted_bytes.decode('utf-8')
-                else:
-                    decrypted = decrypted_bytes
-            else:
-                # Neither method is available
-                print("ERROR: KMS client has neither decrypt_data nor decrypt method")
-                return None
-                
-            return decrypted
-            
-        except Exception as e:
-            print(f"Error in decrypt_data: {str(e)}")
-            return None
+    
     
     def verify_encryption_keys(self):
         """
@@ -1175,11 +1258,12 @@ class Agent:
                 time.sleep(0.2)
             except Exception as e:
                 print(f"Error removing file {file}: {e}")
+    
+    
 
 
 if __name__ == '__main__':
-    agent = Agent(s3=CONSTANTS.AWS_S3, file_name=CONSTANTS.AWS_FILE)
-    # data = agent.get_all_data()
-    # print(data)
-    data = agent.get_one_data('SBI')
+    agent = Agent( file_name=CONSTANTS.AWS_FILE)
+    data = agent.get_all_data()
     print(data)
+    

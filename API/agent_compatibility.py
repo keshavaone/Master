@@ -74,7 +74,7 @@ def create_default_agent():
     from API.Backend import Agent
     
     logger.warning("Creating default agent - should only be used in development!")
-    agent = Agent(s3=CONSTANTS.AWS_S3, file_name=CONSTANTS.AWS_FILE)
+    agent = Agent( file_name=CONSTANTS.AWS_FILE)
     
     # Set a default auth context
     if hasattr(agent, 'set_auth_context'):
