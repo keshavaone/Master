@@ -1390,16 +1390,49 @@ class ModernDataDialog(QDialog):
 
         card_layout.addLayout(content_layout)
 
-        # Add the card to the items layout
-        items_layout = category_panel.findChild(QWidget).layout()
+        # Find the items layout in the category panel
+        # We need to safely find the layout where we should add the card
+        panel_layout = category_panel.layout()
+        if not panel_layout:
+            # If panel has no layout, create one
+            panel_layout = QVBoxLayout(category_panel)
+        
+        # Try to find the items container widget
+        items_container = None
+        items_layout = None
+        
+        # Search through all children of the panel to find our items container
+        for i in range(panel_layout.count()):
+            widget_item = panel_layout.itemAt(i)
+            if widget_item and widget_item.widget():
+                widget = widget_item.widget()
+                # Check if this looks like our items container
+                if isinstance(widget, QWidget) and widget != card_frame:
+                    items_container = widget
+                    if widget.layout():
+                        items_layout = widget.layout()
+                        break
+        
+        # If we couldn't find it, create one
+        if not items_layout:
+            # Create a new container for items
+            items_container = QWidget(category_panel)
+            items_layout = QVBoxLayout(items_container)
+            items_layout.setContentsMargins(10, 5, 10, 5)
+            items_layout.setSpacing(10)
+            panel_layout.addWidget(items_container)
+        
+        # Now we have a valid items_layout
         items_layout.addWidget(card_frame)
 
         # Update item count
-        count_label = category_panel.findChild(
-            QLabel, "", Qt.FindChildrenRecursively)
-        if count_label and "items" in count_label.text():
-            count = items_layout.count()
-            count_label.setText(f"({count} items)")
+        count_labels = category_panel.findChildren(QLabel, "", Qt.FindChildrenRecursively)
+        for label in count_labels:
+            if label.text() and "items" in label.text():
+                # This is probably our count label
+                count = items_layout.count()
+                label.setText(f"({count} items)")
+                break
 
     def clear_panels(self):
         """Clear all category panels."""

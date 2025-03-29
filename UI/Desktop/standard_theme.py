@@ -307,6 +307,133 @@ class StandardTheme:
         return style
     
     @classmethod
+    def get_label_style(cls, type='default', size='medium', bold=False):
+        """
+        Get standardized label styling.
+        
+        Args:
+            type (str): 'default', 'primary', 'secondary', 'success', 'danger', 
+                       'warning', 'info', 'muted'
+            size (str): 'small', 'medium', 'large', 'xlarge'
+            bold (bool): Whether to use bold font weight
+            
+        Returns:
+            str: CSS style string for the label
+        """
+        # Base style for all labels
+        style = """
+            font-family: """ + cls.FONT_FAMILY_PRIMARY + """;
+        """
+        
+        # Add font weight if bold
+        if bold:
+            style += """
+                font-weight: bold;
+            """
+        
+        # Size variations
+        if size == 'small':
+            style += """
+                font-size: """ + cls.FONT_SIZE_SMALL + """;
+            """
+        elif size == 'medium':
+            style += """
+                font-size: """ + cls.FONT_SIZE_NORMAL + """;
+            """
+        elif size == 'large':
+            style += """
+                font-size: """ + cls.FONT_SIZE_LARGE + """;
+            """
+        elif size == 'xlarge':
+            style += """
+                font-size: """ + cls.FONT_SIZE_XLARGE + """;
+            """
+        
+        # Type variations
+        if type == 'primary':
+            style += """
+                color: """ + cls.PRIMARY + """;
+            """
+        elif type == 'secondary':
+            style += """
+                color: """ + cls.SECONDARY + """;
+            """
+        elif type == 'success':
+            style += """
+                color: """ + cls.SUCCESS + """;
+            """
+        elif type == 'danger':
+            style += """
+                color: """ + cls.DANGER + """;
+            """
+        elif type == 'warning':
+            style += """
+                color: """ + cls.WARNING + """;
+            """
+        elif type == 'info':
+            style += """
+                color: """ + cls.INFO + """;
+            """
+        elif type == 'muted':
+            style += """
+                color: """ + cls.TEXT_SECONDARY + """;
+            """
+        else:  # default
+            style += """
+                color: """ + cls.TEXT_PRIMARY + """;
+            """
+        
+        return style
+    
+    @classmethod
+    def get_frame_style(cls, type='default', elevation=0):
+        """
+        Get standardized frame styling.
+        
+        Args:
+            type (str): 'default', 'card', 'panel', 'paper', 'raised'
+            elevation (int): Shadow elevation level (0-3)
+            
+        Returns:
+            str: CSS style string for the frame
+        """
+        # Base style for all frames
+        style = """
+            background-color: """ + cls.BG_DEFAULT + """;
+            border-radius: """ + cls.BORDER_RADIUS_MEDIUM + """;
+        """
+        
+        # Type variations
+        if type == 'card':
+            style += """
+                border: 1px solid """ + cls.GRAY_200 + """;
+                padding: 16px;
+            """
+        elif type == 'panel':
+            style += """
+                border: 1px solid """ + cls.GRAY_300 + """;
+                padding: 12px;
+            """
+        elif type == 'paper':
+            style += """
+                background-color: """ + cls.BG_PAPER + """;
+                border: 1px solid """ + cls.GRAY_200 + """;
+                padding: 8px;
+            """
+        elif type == 'raised':
+            style += """
+                border: none;
+                padding: 16px;
+                margin: """ + str(elevation * 2) + """px;
+            """
+        else:  # default
+            style += """
+                border: 1px solid """ + cls.GRAY_300 + """;
+            """
+        
+        return style
+    
+    @classmethod
     def get_card_style(cls, card_type='default', elevation=1):
         """
         Get a standardized card style with optional elevation.
@@ -636,6 +763,64 @@ class StandardTheme:
                 border: none;
                 font-size: """ + cls.FONT_SIZE_SMALL + """;
                 padding: 5px;
+            }
+        """
+    
+    @classmethod
+    def get_application_style(cls):
+        """
+        Get main application styling (combines main window and common elements).
+        
+        Returns:
+            str: CSS style string for application
+        """
+        return cls.get_main_window_style() + """
+            /* Common elements styling */
+            QWidget {
+                font-family: """ + cls.FONT_FAMILY_PRIMARY + """;
+            }
+            
+            QToolBar {
+                background-color: """ + cls.BG_PAPER + """;
+                border: 1px solid """ + cls.GRAY_300 + """;
+                spacing: 4px;
+            }
+            
+            QToolBar QToolButton {
+                background-color: transparent;
+                border: 1px solid transparent;
+                border-radius: 4px;
+                padding: 3px;
+            }
+            
+            QToolBar QToolButton:hover {
+                background-color: """ + cls.PRIMARY_LIGHT + """;
+                border: 1px solid """ + cls.PRIMARY + """;
+            }
+            
+            QToolBar QToolButton:pressed {
+                background-color: """ + cls.PRIMARY + """;
+            }
+            
+            QMenu {
+                background-color: """ + cls.BG_DEFAULT + """;
+                border: 1px solid """ + cls.GRAY_300 + """;
+                border-radius: 4px;
+            }
+            
+            QMenu::item {
+                padding: 6px 24px 6px 12px;
+            }
+            
+            QMenu::item:selected {
+                background-color: """ + cls.PRIMARY_LIGHT + """;
+                color: """ + cls.PRIMARY_DARK + """;
+            }
+            
+            QMenu::separator {
+                height: 1px;
+                background-color: """ + cls.GRAY_300 + """;
+                margin: 4px 12px;
             }
         """
     

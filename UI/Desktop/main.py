@@ -576,6 +576,18 @@ class GuardMainWindow(QMainWindow):
         # Set up tabs
         self.setup_data_management_tab()
         
+        # Create a container for the login panel that we can show/hide
+        self.login_container = QFrame(self)
+        self.login_container.setObjectName("loginContainer")
+        self.login_container.setFrameShape(QFrame.NoFrame)
+        self.login_container.setFixedSize(400, 300)  # Set appropriate size
+        self.login_container.setStyleSheet("background: transparent;")
+        login_container_layout = QVBoxLayout(self.login_container)
+        login_container_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Initially hide the login container
+        self.login_container.setVisible(False)
+        
         # Add session status widget to main layout (fixed at bottom)
         self.session_status = EnhancedSessionWidget(self, self.session_manager, self.auth_service)
         main_layout.addWidget(self.session_status)
@@ -880,11 +892,29 @@ class GuardMainWindow(QMainWindow):
         self.btn_connect_server.setText('Authenticating...')
         self.btn_connect_server.setDisabled(True)
         
-        # Create login panel with AWS SSO button
+        # Remove any existing login panels from previous attempts
+        for i in reversed(range(self.data_tab.layout().count())):
+            widget = self.data_tab.layout().itemAt(i).widget()
+            if isinstance(widget, QFrame) and widget.objectName() == "loginPanel":
+                widget.deleteLater()
+        
+        # Create a dedicated container that will float above other widgets
         login_panel = QFrame(self)
+        login_panel.setObjectName("loginPanel")
         login_panel.setFrameShape(QFrame.StyledPanel)
         login_panel.setStyleSheet(StandardTheme.get_card_style('default', 2))
+        login_panel.setFixedSize(400, 280)  # Fixed size for better positioning
+        
+        # Center the panel on the window
+        login_panel.move(
+            (self.width() - login_panel.width()) // 2,
+            (self.height() - login_panel.height()) // 2
+        )
+        
+        # Set up panel layout
         login_layout = QVBoxLayout(login_panel)
+        login_layout.setContentsMargins(20, 20, 20, 20)
+        login_layout.setSpacing(15)
         
         # Add header
         header_label = QLabel("Authentication", login_panel)
@@ -910,8 +940,29 @@ class GuardMainWindow(QMainWindow):
         security_label.setStyleSheet(StandardTheme.get_label_style('muted', 'small'))
         login_layout.addWidget(security_label)
         
-        # Place login panel in center of tab widget
-        self.data_tab.layout().addWidget(login_panel)
+        # Add a close icon
+        close_button = QPushButton("×", login_panel)
+        close_button.setToolTip("Cancel")
+        close_button.setFixedSize(24, 24)
+        close_button.setStyleSheet("""
+            QPushButton {
+                background-color: #E0E0E0;
+                border-radius: 12px;
+                font-weight: bold;
+                font-size: 16px;
+            }
+            QPushButton:hover {
+                background-color: #F44336;
+                color: white;
+            }
+        """)
+        close_button.clicked.connect(login_panel.deleteLater)
+        # Position in top-right corner
+        close_button.move(login_panel.width() - 30, 10)
+        
+        # Show the login panel
+        login_panel.show()
+        login_panel.raise_()
         
         # Log attempt
         self.update_log(
@@ -919,7 +970,7 @@ class GuardMainWindow(QMainWindow):
             "Authentication panel displayed"
         )
         
-        # Re-enable button in case user cancels
+        # Re-enable connect button
         self.btn_connect_server.setText('Connect to Server')
         self.btn_connect_server.setEnabled(True)
         
@@ -1041,6 +1092,18 @@ class GuardMainWindow(QMainWindow):
         except Exception as e:
             self.logger.error(f"Error initializing API client: {str(e)}")
             raise
+    
+    def resizeEvent(self, event):
+        """Handle window resize events."""
+        super().resizeEvent(event)
+        
+        # Keep any login panel centered
+        for child in self.children():
+            if isinstance(child, QFrame) and child.objectName() == "loginPanel":
+                child.move(
+                    (self.width() - child.width()) // 2,
+                    (self.height() - child.height()) // 2
+                )
 
     def connect_after_authentication(self):
         """Complete the connection process after successful authentication."""
@@ -1048,10 +1111,9 @@ class GuardMainWindow(QMainWindow):
         self.update_log(timestamp, "Authentication successful")
         
         # Remove login panel if present
-        for i in reversed(range(self.data_tab.layout().count())):
-            widget = self.data_tab.layout().itemAt(i).widget()
-            if isinstance(widget, QFrame) and widget.objectName() != "mainContainer":
-                widget.deleteLater()
+        for child in self.children():
+            if isinstance(child, QFrame) and child.objectName() == "loginPanel":
+                child.deleteLater()
         
         # Update UI elements
         self.show_authenticated_ui()
