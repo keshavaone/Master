@@ -19,30 +19,24 @@ import pandas as pd
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QPushButton, QLabel, QTableWidget, QHeaderView, QTableWidgetItem,
-    QLineEdit, QMessageBox, QInputDialog, QDialog, QMenu, QTabWidget, 
+    QMessageBox, QDialog, QMenu, QTabWidget, 
     QStatusBar, QProgressDialog, QFrame, QGraphicsDropShadowEffect, 
-    QToolTip, QApplication, QSplitter, QFileDialog, QGroupBox, QSpacerItem,
-    QSizePolicy, QProgressBar, QStyle
+    QToolTip, QApplication, QSplitter, QGroupBox,
+    QProgressBar, QStyle
 )
-from PyQt5.QtGui import QIcon, QColor, QPixmap, QCursor, QFont
-from PyQt5.QtCore import Qt, QTimer, QDateTime, QSize, QPoint, QRect, QThread, pyqtSignal
+from PyQt5.QtGui import QColor
+from PyQt5.QtCore import Qt, QTimer, QDateTime, QPoint, QRect
 
 # Application imports
 import api.CONSTANTS as CONSTANTS
 from UI.Desktop.session_manager import SessionManager
 from UI.Desktop.auth_service import AuthenticationService
 from UI.Desktop.api_client import APIClient
-from UI.Desktop.modern_components import (
-    ModernButton, ModernDataDialog, CRUDHelper, DataItemEditDialog
-)
+from UI.Desktop.modern_components import CRUDHelper
+
+from UI.Desktop.modern_components import EnhancedModernDataDialog as ModernDataDialog
 from UI.Desktop.standard_theme import StandardTheme
 
-# Import deletion handler if available
-try:
-    from UI.Desktop.delete_handler import DeleteHandler
-    delete_handler_available = True
-except ImportError:
-    delete_handler_available = False
 
 # Setup logging with rotation
 os.makedirs('logs', exist_ok=True)
