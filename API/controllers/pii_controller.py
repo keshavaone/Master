@@ -43,9 +43,8 @@ async def get_all_pii_data(
         # Log the request
         logger.info(
             f"Getting PII data for user: {user_info.get('sub')} from {client_ip}")
-
         # Get all items from the database
-        success, items = db_handler.get_all_items()
+        success, items = db_handler.get_all_items(user_info.get('sub').split(':')[-1])
 
         if not success:
             # Handle database error

@@ -58,31 +58,46 @@ class DatabaseHandler:
         # Log initialization
         self.logger.info(f"Database handler initialized with table: {self.table_name}")
     
-    def get_all_items(self) -> Tuple[bool, Union[List[Dict[str, Any]], str]]:
+    def get_all_items(self, user) -> Tuple[bool, Union[List[Dict[str, Any]], str]]:
         """
-        Get all items from the database.
+        Get all items from the database for a specific user.
         
+        Args:
+            user (str): The user value to filter items by
+            
         Returns:
             Tuple[bool, Union[List[Dict], str]]: Success flag and items or error message
         """
         try:
-            # Get all items from the table
-            response = self.table.scan()
+            # Create a filter expression for the user attribute
+            from boto3.dynamodb.conditions import Attr
+            
+            # Log the query operation
+            self.logger.info(f"Querying items for user: {user}")
+            
+            # Scan with a filter expression to get only items for the specified user
+            response = self.table.scan(
+                FilterExpression=Attr('user').eq(user)
+            )
             items = response.get('Items', [])
             
             # Handle pagination if there are more items
             while 'LastEvaluatedKey' in response:
-                response = self.table.scan(ExclusiveStartKey=response['LastEvaluatedKey'])
+                response = self.table.scan(
+                    ExclusiveStartKey=response['LastEvaluatedKey'],
+                    FilterExpression=Attr('user').eq(user)
+                )
                 items.extend(response.get('Items', []))
+            
             # Log success
-            self.logger.info(f"Retrieved {len(items)} items from database")
+            self.logger.info(f"Retrieved {len(items)} items for user {user} from database")
             return True, items
         except ClientError as e:
             error_msg = f"DynamoDB client error: {e}"
             self.logger.error(error_msg)
             return False, error_msg
         except Exception as e:
-            error_msg = f"Unexpected error retrieving items: {e}"
+            error_msg = f"Unexpected error retrieving items for user {user}: {e}"
             self.logger.error(error_msg)
             return False, error_msg
     
