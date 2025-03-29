@@ -7,11 +7,14 @@ modern, user-friendly interface.
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QDialog, QLineEdit, QScrollArea, QFrame, QMessageBox,
-    QProgressBar, QStyle, QComboBox,
-    QGroupBox, QApplication
+    QProgressBar, QStyle, QComboBox, QToolTip,
+    QGroupBox, QApplication, QGraphicsDropShadowEffect
 )
-from PyQt5.QtCore import Qt, QSize, QTimer, QDateTime
+from PyQt5.QtGui import QColor
+
+from PyQt5.QtCore import Qt, QSize, QTimer, QDateTime, QPoint, QRect
 import ast
+import datetime
 import logging
 
 logger = logging.getLogger("modern_ui")
@@ -39,99 +42,126 @@ class ModernColors:
     TEXT_MUTED = "#6c757d"
     TEXT_LIGHT = "#f8f9fa"
 
-
 class SessionStatusWidget(QWidget):
     """
-    Enhanced session status widget with visual indicators.
-
-    This widget shows the current authentication state, session type,
-    and remaining session time with appropriate visual cues.
+    Advanced session status widget with visual indicators and controls.
+    
+    This widget provides a comprehensive view of the current session state
+    with visual indicators for session health, expiration countdown,
+    and interactive controls for session management.
     """
-
-    def __init__(self, parent=None, session_manager=None):
+    
+    def __init__(self, parent=None, session_manager=None, auth_service=None):
         """
         Initialize the session status widget.
-
+        
         Args:
             parent: Parent widget
             session_manager: Session manager to monitor
+            auth_service: Authentication service for server communication
         """
         super().__init__(parent)
         self.session_manager = session_manager
+        self.auth_service = auth_service
+        self.parent = parent
+        
+        # Set up update timer
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_status)
-        self.timer.start(1000)  # Update every second
-
+        self.timer.start(1000)  # Update every second for accurate countdown
+        
+        # Setup UI
         self.setup_ui()
-
+        
+        # Initial update
+        self.update_status()
+    
     def setup_ui(self):
-        """Set up the user interface."""
+        """Set up the user interface with modern styling."""
         # Main layout
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(10, 5, 10, 5)
         main_layout.setSpacing(10)
-
-        # Create background frame
-        self.bg_frame = QFrame(self)
-        self.bg_frame.setFrameShape(QFrame.StyledPanel)
-        self.bg_frame.setStyleSheet(f"""
-            QFrame {{
-                background-color: #f8fbff;
-                border: 1px solid {ModernColors.BG_DARK};
-                border-radius: 10px;
-            }}
+        
+        # Create card container with shadow effect
+        self.status_card = QFrame(self)
+        self.status_card.setObjectName("statusCard")
+        self.status_card.setFrameShape(QFrame.StyledPanel)
+        self.status_card.setStyleSheet("""
+            #statusCard {
+                background-color: #ffffff;
+                border-radius: 8px;
+                border: 1px solid #e0e0e0;
+            }
         """)
-        frame_layout = QHBoxLayout(self.bg_frame)
-        frame_layout.setContentsMargins(10, 8, 10, 8)
-        frame_layout.setSpacing(15)
-
+        
+        # Add shadow effect
+        shadow = QGraphicsDropShadowEffect(self.status_card)
+        shadow.setBlurRadius(10)
+        shadow.setColor(QColor(0, 0, 0, 30))
+        shadow.setOffset(0, 3)
+        self.status_card.setGraphicsEffect(shadow)
+        
+        # Card layout
+        card_layout = QHBoxLayout(self.status_card)
+        card_layout.setContentsMargins(15, 10, 15, 10)
+        card_layout.setSpacing(15)
+        
         # Status indicator
-        self.status_indicator = QLabel(self)
+        self.status_indicator = QFrame(self.status_card)
         self.status_indicator.setFixedSize(12, 12)
         self.status_indicator.setStyleSheet("""
-            background-color: #a0a0a0;
+            background-color: #bdbdbd;
             border-radius: 6px;
         """)
-        frame_layout.addWidget(self.status_indicator)
-
-        # Auth info layout (vertical)
-        auth_layout = QVBoxLayout()
-        auth_layout.setContentsMargins(0, 0, 0, 0)
-        auth_layout.setSpacing(2)
-
-        # Auth type and user ID
-        self.auth_type_label = QLabel("Not authenticated", self)
-        self.auth_type_label.setStyleSheet(
-            f"color: {ModernColors.TEXT_PRIMARY}; font-weight: bold;")
-
-        self.user_id_label = QLabel("", self)
-        self.user_id_label.setStyleSheet(
-            f"color: {ModernColors.TEXT_MUTED}; font-size: 10px;")
-
-        auth_layout.addWidget(self.auth_type_label)
-        auth_layout.addWidget(self.user_id_label)
-        frame_layout.addLayout(auth_layout)
-
+        card_layout.addWidget(self.status_indicator)
+        
+        # User info section
+        user_info_layout = QVBoxLayout()
+        user_info_layout.setSpacing(2)
+        
+        self.user_label = QLabel("Not authenticated", self.status_card)
+        self.user_label.setStyleSheet("""
+            font-family: 'Segoe UI', Arial, sans-serif;
+            font-weight: bold;
+            color: #424242;
+            font-size: 13px;
+        """)
+        
+        self.auth_type_label = QLabel("", self.status_card)
+        self.auth_type_label.setStyleSheet("""
+            font-family: 'Segoe UI', Arial, sans-serif;
+            color: #757575;
+            font-size: 11px;
+        """)
+        
+        user_info_layout.addWidget(self.user_label)
+        user_info_layout.addWidget(self.auth_type_label)
+        card_layout.addLayout(user_info_layout)
+        
         # Add spacer
-        frame_layout.addStretch()
-
-        # Time remaining section
-        time_layout = QVBoxLayout()
-        time_layout.setContentsMargins(0, 0, 0, 0)
-        time_layout.setSpacing(2)
-
-        self.remaining_label = QLabel("Session: --:--", self)
-        self.remaining_label.setStyleSheet(
-            f"color: {ModernColors.TEXT_PRIMARY};")
-        self.remaining_label.setAlignment(Qt.AlignRight)
-
-        # Progress bar for remaining time
-        self.time_progress = QProgressBar(self)
+        card_layout.addStretch()
+        
+        # Session time section
+        session_time_layout = QVBoxLayout()
+        session_time_layout.setSpacing(5)
+        
+        self.time_label = QLabel("Session: --:--", self.status_card)
+        self.time_label.setStyleSheet("""
+            font-family: 'Segoe UI', Arial, sans-serif;
+            color: #424242;
+            font-size: 12px;
+            padding-right: 5px;
+        """)
+        self.time_label.setAlignment(Qt.AlignRight)
+        
+        # Progress bar for time remaining
+        self.time_progress = QProgressBar(self.status_card)
         self.time_progress.setRange(0, 100)
         self.time_progress.setValue(0)
         self.time_progress.setTextVisible(False)
         self.time_progress.setFixedHeight(4)
-        self.time_progress.setFixedWidth(120)
+        self.time_progress.setFixedWidth(100)
         self.time_progress.setStyleSheet("""
             QProgressBar {
                 background-color: #e0e0e0;
@@ -139,132 +169,359 @@ class SessionStatusWidget(QWidget):
                 border: none;
             }
             QProgressBar::chunk {
-                background-color: #4361ee;
+                background-color: #1976D2;
                 border-radius: 2px;
             }
         """)
-
-        time_layout.addWidget(self.remaining_label)
-        time_layout.addWidget(self.time_progress)
-        frame_layout.addLayout(time_layout)
-
+        
+        session_time_layout.addWidget(self.time_label)
+        session_time_layout.addWidget(self.time_progress)
+        card_layout.addLayout(session_time_layout)
+        
+        # Button group
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(8)
+        
         # Refresh button
-        self.refresh_button = QPushButton(self)
-        self.refresh_button.setIcon(
-            self.style().standardIcon(QStyle.SP_BrowserReload))
+        self.refresh_button = QPushButton(self.status_card)
+        self.refresh_button.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
         self.refresh_button.setToolTip("Refresh session")
-        self.refresh_button.clicked.connect(self.refresh_session)
         self.refresh_button.setFixedSize(28, 28)
-        self.refresh_button.setStyleSheet(f"""
-            QPushButton {{
-                border: 1px solid {ModernColors.PRIMARY};
+        self.refresh_button.setCursor(Qt.PointingHandCursor)
+        self.refresh_button.setStyleSheet("""
+            QPushButton {
+                background-color: #E3F2FD;
+                border: 1px solid #BBDEFB;
                 border-radius: 4px;
-                background-color: {ModernColors.PRIMARY};
                 padding: 4px;
-            }}
-            QPushButton:hover {{
-                background-color: {ModernColors.SECONDARY};
-                border-color: {ModernColors.SECONDARY};
-            }}
+            }
+            QPushButton:hover {
+                background-color: #BBDEFB;
+            }
+            QPushButton:pressed {
+                background-color: #90CAF9;
+            }
+            QPushButton:disabled {
+                background-color: #F5F5F5;
+                border: 1px solid #E0E0E0;
+            }
         """)
-        frame_layout.addWidget(self.refresh_button)
-
-        # Add the frame to the main layout
-        main_layout.addWidget(self.bg_frame)
-
-        # Initial update
-        self.update_status()
-
+        self.refresh_button.clicked.connect(self.refresh_session)
+        
+        # Info button
+        self.info_button = QPushButton(self.status_card)
+        self.info_button.setIcon(self.style().standardIcon(QStyle.SP_MessageBoxInformation))
+        self.info_button.setToolTip("Session information")
+        self.info_button.setFixedSize(28, 28)
+        self.info_button.setCursor(Qt.PointingHandCursor)
+        self.info_button.setStyleSheet("""
+            QPushButton {
+                background-color: #E8F5E9;
+                border: 1px solid #C8E6C9;
+                border-radius: 4px;
+                padding: 4px;
+            }
+            QPushButton:hover {
+                background-color: #C8E6C9;
+            }
+            QPushButton:pressed {
+                background-color: #A5D6A7;
+            }
+            QPushButton:disabled {
+                background-color: #F5F5F5;
+                border: 1px solid #E0E0E0;
+            }
+        """)
+        self.info_button.clicked.connect(self.show_session_info)
+        
+        button_layout.addWidget(self.refresh_button)
+        button_layout.addWidget(self.info_button)
+        card_layout.addLayout(button_layout)
+        
+        # Add the card to the main layout
+        main_layout.addWidget(self.status_card)
+    
     def update_status(self):
-        """Update the session status display."""
+        """Update the widget with current session status."""
+        # Handle case when not authenticated
         if not self.session_manager or not hasattr(self.session_manager, 'is_authenticated') or not self.session_manager.is_authenticated:
-            # Not authenticated
-            self.status_indicator.setStyleSheet(
-                "background-color: #a0a0a0; border-radius: 6px;")
-            self.auth_type_label.setText("Not authenticated")
-            self.user_id_label.setText("")
-            self.remaining_label.setText("Session: --:--")
+            self.status_indicator.setStyleSheet("""
+                background-color: #bdbdbd;
+                border-radius: 6px;
+            """)
+            self.user_label.setText("Not authenticated")
+            self.auth_type_label.setText("")
+            self.time_label.setText("Session: --:--")
             self.time_progress.setValue(0)
             self.refresh_button.setEnabled(False)
+            self.info_button.setEnabled(False)
             return
-
-        # Get session info
-        session_info = self.session_manager.get_session_info() if hasattr(
-            self.session_manager, 'get_session_info') else {}
-        remaining_seconds = session_info.get("remaining_seconds", 0)
-
-        # Update auth type and user
+        
+        # Get session information
+        session_info = self.session_manager.get_session_info()
+        
+        # Update user information
+        user_id = session_info.get("user_id", "Unknown")
+        self.user_label.setText(f"User: {user_id}")
+        
+        # Update authentication type with friendlier display names
         auth_type = session_info.get("auth_type", "unknown")
-        auth_display = "AWS SSO" if auth_type == "aws_sso" else "Password"
-        self.auth_type_label.setText(auth_display)
-        self.user_id_label.setText(session_info.get("user_id", ""))
-
-        # Update remaining time
+        if auth_type == "aws_sso":
+            auth_label = "AWS Single Sign-On"
+            # Use a branded color for AWS
+            self.status_indicator.setStyleSheet("""
+                background-color: #FF9900;
+                border-radius: 6px;
+            """)
+        elif auth_type == "password":
+            auth_label = "Password Authentication"
+            # Standard secure color
+            self.status_indicator.setStyleSheet("""
+                background-color: #4CAF50;
+                border-radius: 6px;
+            """)
+        else:
+            auth_label = auth_type.replace("_", " ").title()
+            # Generic secure color
+            self.status_indicator.setStyleSheet("""
+                background-color: #2196F3;
+                border-radius: 6px;
+            """)
+        
+        self.auth_type_label.setText(auth_label)
+        
+        # Update time remaining display
+        remaining_seconds = session_info.get("remaining_seconds", 0)
         if remaining_seconds is not None:
-            minutes, seconds = divmod(remaining_seconds, 60)
-            hours, minutes = divmod(minutes, 60)
-
-            if hours > 0:
-                time_text = f"{hours}h {minutes}m"
+            # Format time remaining in human-readable format
+            if remaining_seconds > 3600:
+                hours, remainder = divmod(remaining_seconds, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                time_text = f"{int(hours)}h {int(minutes)}m"
+            elif remaining_seconds > 60:
+                minutes, seconds = divmod(remaining_seconds, 60)
+                time_text = f"{int(minutes)}m {int(seconds)}s"
             else:
-                time_text = f"{minutes}m {seconds}s"
-
-            self.remaining_label.setText(f"Session: {time_text}")
-
+                time_text = f"{int(remaining_seconds)}s"
+            
+            self.time_label.setText(f"Session: {time_text}")
+            
             # Calculate percentage for progress bar
-            max_duration = 3600  # 1 hour is standard
+            # Determine max duration based on auth type
             if auth_type == "aws_sso":
                 max_duration = 8 * 3600  # 8 hours for AWS SSO
-
+            else:
+                max_duration = 3600  # 1 hour default for password auth
+            
             percentage = min(100, (remaining_seconds / max_duration) * 100)
             self.time_progress.setValue(int(percentage))
-
-            # Set color based on remaining time
-            if remaining_seconds < 300:  # Less than 5 minutes
+            
+            # Update visual indicators based on remaining time
+            if remaining_seconds < 300:  # Less than 5 minutes - critical
                 self.time_progress.setStyleSheet("""
-                    QProgressBar { background-color: #e0e0e0; border-radius: 2px; }
-                    QProgressBar::chunk { background-color: #e63946; border-radius: 2px; }
+                    QProgressBar { background-color: #FFEBEE; border-radius: 2px; }
+                    QProgressBar::chunk { background-color: #F44336; border-radius: 2px; }
                 """)
-                self.remaining_label.setStyleSheet(
-                    "color: #e63946; font-weight: bold;")
-            elif remaining_seconds < 600:  # Less than 10 minutes
+                self.time_label.setStyleSheet("color: #D32F2F; font-weight: bold;")
+            elif remaining_seconds < 600:  # Less than 10 minutes - warning
                 self.time_progress.setStyleSheet("""
-                    QProgressBar { background-color: #e0e0e0; border-radius: 2px; }
-                    QProgressBar::chunk { background-color: #f72585; border-radius: 2px; }
+                    QProgressBar { background-color: #FFF8E1; border-radius: 2px; }
+                    QProgressBar::chunk { background-color: #FFC107; border-radius: 2px; }
                 """)
-                self.remaining_label.setStyleSheet("color: #f72585;")
-            else:
+                self.time_label.setStyleSheet("color: #FFA000; font-weight: bold;")
+            else:  # Healthy state
                 self.time_progress.setStyleSheet("""
-                    QProgressBar { background-color: #e0e0e0; border-radius: 2px; }
-                    QProgressBar::chunk { background-color: #4361ee; border-radius: 2px; }
+                    QProgressBar { background-color: #E0E0E0; border-radius: 2px; }
+                    QProgressBar::chunk { background-color: #1976D2; border-radius: 2px; }
                 """)
-                self.remaining_label.setStyleSheet(
-                    f"color: {ModernColors.TEXT_PRIMARY};")
-
-        # Update status indicator
-        if self.session_manager.is_authenticated:
-            self.status_indicator.setStyleSheet(
-                "background-color: #4cc9f0; border-radius: 6px;")
-            self.refresh_button.setEnabled(True)
-        else:
-            self.status_indicator.setStyleSheet(
-                "background-color: #e63946; border-radius: 6px;")
-            self.refresh_button.setEnabled(False)
-
+                self.time_label.setStyleSheet("color: #424242;")
+        
+        # Enable buttons when authenticated
+        self.refresh_button.setEnabled(True)
+        self.info_button.setEnabled(True)
+    
     def refresh_session(self):
-        """Attempt to refresh the session."""
-        if hasattr(self.session_manager, 'refresh_token') and callable(self.session_manager.refresh_token):
+        """Attempt to refresh the session token."""
+        if not self.session_manager:
+            return
+            
+        # Visual feedback that refresh is being attempted
+        self.refresh_button.setEnabled(False)
+        self.refresh_button.setToolTip("Refreshing...")
+        QApplication.processEvents()
+        
+        try:
+            # Try both refresh methods if available
+            refresh_succeeded = False
+            
+            # Try auth_service first if available
+            if self.auth_service and hasattr(self.auth_service, 'refresh_token'):
+                try:
+                    refresh_succeeded = self.auth_service.refresh_token()
+                except Exception as e:
+                    self.logger.warning(f"Auth service refresh failed: {str(e)}")
+            
+            # Try session manager if auth_service failed or isn't available
+            if not refresh_succeeded and hasattr(self.session_manager, 'refresh_token'):
+                try:
+                    refresh_succeeded = self.session_manager.refresh_token()
+                except Exception as e:
+                    self.logger.warning(f"Session manager refresh failed: {str(e)}")
+            
+            # Provide feedback based on success
+            if refresh_succeeded:
+                # Flash the indicator for success feedback
+                original_style = self.status_indicator.styleSheet()
+                self.status_indicator.setStyleSheet("""
+                    background-color: #4CAF50; 
+                    border-radius: 6px;
+                    border: 2px solid #81C784;
+                """)
+                
+                # Show a brief tooltip success message
+                QToolTip.showText(
+                    self.refresh_button.mapToGlobal(QPoint(0, self.refresh_button.height())),
+                    "Session refreshed successfully",
+                    self.refresh_button,
+                    QRect(),
+                    2000  # Hide after 2 seconds
+                )
+                
+                # Reset style after animation
+                QTimer.singleShot(1500, lambda: self.status_indicator.setStyleSheet(original_style))
+            else:
+                # Flash the indicator for failure feedback
+                self.status_indicator.setStyleSheet("""
+                    background-color: #F44336; 
+                    border-radius: 6px;
+                """)
+                
+                # Show error message
+                QToolTip.showText(
+                    self.refresh_button.mapToGlobal(QPoint(0, self.refresh_button.height())),
+                    "Could not refresh session",
+                    self.refresh_button,
+                    QRect(),
+                    2000  # Hide after 2 seconds
+                )
+                
+                # Reset after animation
+                QTimer.singleShot(1500, self.update_status)
+        except Exception as e:
+            # Log the error
+            if hasattr(self, 'logger'):
+                self.logger.error(f"Error refreshing session: {str(e)}")
+            
+            # Reset to normal state
+            QTimer.singleShot(1500, self.update_status)
+        finally:
+            # Re-enable the button
+            self.refresh_button.setEnabled(True)
+            self.refresh_button.setToolTip("Refresh session")
+    
+    def show_session_info(self):
+        """Show detailed session information dialog."""
+        if not self.session_manager or not self.session_manager.is_authenticated:
+            return
+            
+        # Get session information from both sources if available
+        session_info = self.session_manager.get_session_info()
+        auth_info = {}
+        
+        if self.auth_service and hasattr(self.auth_service, 'get_session_info'):
+            auth_info = self.auth_service.get_session_info()
+        
+        # Format expiration time
+        expiration_time = session_info.get('expiration_time', '')
+        if expiration_time:
+            # Try to format as local time if it's a string
             try:
-                success = self.session_manager.refresh_token()
-                if success:
-                    # Show success indicator briefly
-                    current_style = self.status_indicator.styleSheet()
-                    self.status_indicator.setStyleSheet(
-                        "background-color: #4cc9f0; border-radius: 6px;")
-                    QTimer.singleShot(
-                        1000, lambda: self.status_indicator.setStyleSheet(current_style))
-            except Exception as e:
-                print(f"Session refresh error: {str(e)}")
+                if isinstance(expiration_time, str):
+                    # Parse ISO format
+                    dt = datetime.datetime.fromisoformat(expiration_time.replace('Z', '+00:00'))
+                    # Format in local time
+                    expiration_formatted = dt.strftime('%Y-%m-%d %H:%M:%S (local time)')
+                else:
+                    expiration_formatted = expiration_time
+            except:
+                expiration_formatted = expiration_time
+        else:
+            expiration_formatted = "Unknown"
+            
+        # Create html formatted output
+        info_html = f"""
+        <html>
+        <head>
+            <style>
+                body {{ font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 10px; }}
+                h2 {{ color: #1976D2; font-size: 16px; margin-top: 15px; margin-bottom: 5px; }}
+                .section {{ background-color: #F5F5F5; border-radius: 5px; padding: 10px; margin-bottom: 10px; }}
+                .key {{ font-weight: bold; color: #424242; }}
+                .value {{ color: #212121; }}
+                .highlight {{ font-weight: bold; color: #1976D2; }}
+                .warning {{ color: #F57C00; }}
+                table {{ border-collapse: collapse; width: 100%; }}
+                td {{ padding: 6px; vertical-align: top; }}
+                td:first-child {{ width: 140px; }}
+            </style>
+        </head>
+        <body>
+            <div class="section">
+                <h2>Session Information</h2>
+                <table>
+                    <tr><td class="key">User ID:</td><td class="value highlight">{session_info.get('user_id', 'Unknown')}</td></tr>
+                    <tr><td class="key">Auth Type:</td><td class="value">{session_info.get('auth_type', 'Unknown')}</td></tr>
+                    <tr><td class="key">IP Address:</td><td class="value">{session_info.get('auth_ip', 'Unknown')}</td></tr>
+                    <tr><td class="key">Started:</td><td class="value">{session_info.get('auth_timestamp', 'Unknown')}</td></tr>
+                    <tr><td class="key">Expires:</td><td class="value">{expiration_formatted}</td></tr>
+                    <tr><td class="key">Remaining:</td><td class="value highlight">{session_info.get('remaining_formatted', 'Unknown')}</td></tr>
+                </table>
+            </div>
+        """
+        
+        # Add API auth info if available
+        if auth_info:
+            info_html += f"""
+            <div class="section">
+                <h2>API Authentication</h2>
+                <table>
+                    <tr><td class="key">User ID:</td><td class="value">{auth_info.get('user_id', 'N/A')}</td></tr>
+                    <tr><td class="key">Auth Type:</td><td class="value">{auth_info.get('auth_type', 'N/A')}</td></tr>
+                    <tr><td class="key">Token Expires:</td><td class="value">{auth_info.get('token_expires_at', 'N/A')}</td></tr>
+                </table>
+            </div>
+            """
+            
+        # Add AWS profile info if available
+        if session_info.get('aws_profile'):
+            info_html += f"""
+            <div class="section">
+                <h2>AWS Profile</h2>
+                <table>
+                    <tr><td class="key">Profile:</td><td class="value highlight">{session_info.get('aws_profile', 'N/A')}</td></tr>
+                </table>
+            </div>
+            """
+            
+        # Add security notice
+        info_html += """
+            <div class="section" style="background-color: #E8F5E9;">
+                <h2>Security Notice</h2>
+                <p style="font-size: 12px;">Your session is secured with enterprise-grade encryption. All data is encrypted at rest and in transit.</p>
+                <p style="font-size: 12px;" class="warning">Do not share your credentials or leave your session unattended. When finished, please log out.</p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        # Create a message box with the formatted HTML
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Session Information")
+        msg_box.setTextFormat(Qt.RichText)
+        msg_box.setText(info_html)
+        msg_box.setIcon(QMessageBox.Information)
+        msg_box.setStandardButtons(QMessageBox.Ok)
+        msg_box.exec_()
 
 
 class ModernButton(QPushButton):
