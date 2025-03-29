@@ -1,3 +1,5 @@
+# api/main.py
+
 """
 Main FastAPI application.
 
@@ -10,14 +12,19 @@ from logging.handlers import RotatingFileHandler
 import time
 from collections import Counter
 from contextlib import asynccontextmanager
+from typing import Dict, Any
 
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, status, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from api.auth import auth_router, init_auth_system
-from api.controllers.pii_controller import router as pii_router
+from api.controllers.pii_enhanced_controller import router as pii_router
+from api.controllers.pii_enhanced_controller import router as pii_enhanced_router
+from api.controllers.categories_controller import router as categories_router
 from api.controllers.system_controller import router as system_router
+from api.controllers.activity_controller import router as activity_router
+from api.controllers.auth_enhanced_controller import router as auth_enhanced_router
 from api.encryption import get_kms_handler
 
 # Configure logging
@@ -71,13 +78,19 @@ app = FastAPI(
 
 # Include routers
 app.include_router(auth_router)
+app.include_router(auth_enhanced_router)  # New enhanced auth router
 app.include_router(pii_router)
+app.include_router(pii_enhanced_router)   # New enhanced PII router
+app.include_router(categories_router)     # New categories router
 app.include_router(system_router)
+app.include_router(activity_router)       # New activity router
 
-# Set up CORS
+# Set up CORS for the React frontend
 origins = [
     "http://localhost:8000",
-    "http://localhost:3000",  # Add any frontend origins
+    "http://localhost:3000",  
+    "https://guard-dashboard.example.com",  # Add your React app domain
+    "*"  # For development - restrict in production
 ]
 
 app.add_middleware(
@@ -87,6 +100,27 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Middleware to add pagination headers
+@app.middleware("http")
+async def add_pagination_headers(request: Request, call_next):
+    """
+    Add pagination headers to responses when pagination is used.
+    """
+    # Process the request and get the response
+    response = await call_next(request)
+    
+    # Check if pagination info is available
+    if hasattr(request.state, 'pagination'):
+        pagination = request.state.pagination
+        
+        # Add pagination headers
+        response.headers["X-Total-Count"] = str(pagination["total"])
+        response.headers["X-Page"] = str(pagination["page"])
+        response.headers["X-Per-Page"] = str(pagination["limit"])
+        response.headers["X-Total-Pages"] = str(pagination["pages"])
+        
+    return response
 
 # Add request counting middleware
 @app.middleware("http")
@@ -135,17 +169,16 @@ async def count_api_calls(request: Request, call_next):
 async def root():
     """Root endpoint."""
     return {
-        "Details":{
-            "API_Version": os.environ.get("API_VERSION", "1.0.0"),
-            "Environment": os.environ.get("ENVIRONMENT", "development")
+        "details": {
+            "api_version": os.environ.get("API_VERSION", "1.0.0"),
+            "environment": os.environ.get("ENVIRONMENT", "development")
         },
-        "Title": app.title,
+        "title": app.title,
         "version": app.version,
         "description": app.description,
         "documentation": "/docs",
-        "health_check": "/health",
-        "system_info": "/info",
-        "message": "Welcome to the "+app.title
+        "health_check": "/system/health",
+        "message": "Welcome to the GUARD API for secure PII data management"
     }
 
 # Check if running directly
