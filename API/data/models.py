@@ -41,15 +41,24 @@ class PIIItemCreate(PIIItemBase):
     pii: str = Field(..., description="PII data as a string (typically JSON)")
 
 
-class PIIItemUpdate(PIIItemBase):
+class PIIItemUpdate(BaseModel):
     """
     Model for updating PII data.
     """
-    id: str = Field(..., description="Unique ID of the record", alias="_id")
+    id: Optional[str] = Field(None, description="Unique ID of the record", alias="_id")
+    category: str = Field(..., description="Category of the PII data")
+    type: str = Field(..., description="Type of the PII data")
     pii: str = Field(..., description="PII data as a string (typically JSON)")
     
     model_config = {
-        "populate_by_name": True
+        "populate_by_name": True,
+        "json_schema_extra": {
+            "example": {
+                "category": "Financial",
+                "type": "CreditCards",
+                "pii": "[{'item_name': 'Card Number', 'data': '**** **** **** 1234'}]"
+            }
+        }
     }
 
 

@@ -159,6 +159,42 @@ class DatabaseHandler:
             self.logger.error(error_msg)
             return False, error_msg
     
+    def get_item_by_id(self, item_id: str) -> Tuple[bool, Union[Dict[str, Any], str]]:
+        """
+        Get item by ID.
+        
+        Args:
+            item_id (str): ID of the item to retrieve
+            
+        Returns:
+            Tuple[bool, Union[Dict, str]]: Success flag and item or error message
+        """
+        try:
+            # Get the item by its ID
+            response = self.table.get_item(
+                Key={'_id': item_id}
+            )
+            
+            # Check if the item exists
+            if 'Item' not in response:
+                self.logger.warning(f"No item found with ID: {item_id}")
+                return False, f"No item found with ID: {item_id}"
+            
+            # Return the item
+            item = response['Item']
+            
+            # Log success
+            self.logger.info(f"Retrieved item with ID: {item_id}")
+            return True, item
+        except ClientError as e:
+            error_msg = f"DynamoDB client error: {e}"
+            self.logger.error(error_msg)
+            return False, error_msg
+        except Exception as e:
+            error_msg = f"Unexpected error retrieving item: {e}"
+            self.logger.error(error_msg)
+            return False, error_msg
+    
     def decrypt_item(self, item: Dict[str, Any]) -> Tuple[bool, Union[Dict[str, Any], str]]:
         """
         Decrypt an item's PII data.
