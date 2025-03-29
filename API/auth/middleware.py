@@ -12,8 +12,9 @@ from fastapi import Request, HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from api.auth.core import AuthSettings
-from api.auth.jwt_handler import verify_token
+from api.auth.jwt_handler import verify_token, is_token_blacklisted
 from api.auth.aws_sso import get_caller_identity
+from api.auth.blacklist_handler import extract_jti_from_token, token_blacklist
 
 # Configure logging
 logger = logging.getLogger("api.auth.middleware")
@@ -102,6 +103,16 @@ class AuthDependency(HTTPBearer):
                 return user_info
             
             logger.warning("AWS credentials validation failed, continuing to other auth methods")
+        
+        # First, check if token is blacklisted
+        jti = extract_jti_from_token(token)
+        if jti and token_blacklist.check(jti):
+            logger.warning(f"Rejected blacklisted token with JTI {jti}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has been revoked or logged out",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         
         # Check token type and validate
         if token.startswith("AWS-"):

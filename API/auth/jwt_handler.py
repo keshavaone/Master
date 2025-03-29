@@ -9,7 +9,7 @@ import time
 import secrets
 import logging
 import datetime
-from typing import Dict, Any, Optional, Tuple, Union, List
+from typing import Dict, Any, Optional, Tuple, Union, List, Set
 
 try:
     import jwt
@@ -26,8 +26,11 @@ from api.auth.core import AuthSettings, AuthResult
 logger = logging.getLogger("api.auth.jwt")
 logger.setLevel(logging.INFO)
 
-# Token blacklist (in-memory for simplicity; use Redis or database in production)
+# Token blacklist data structures
+# In-memory token blacklist - JTI based
 _token_blacklist = set()
+# User-to-token mapping - to track all tokens for a user
+_user_tokens = {}
 
 
 def generate_jwt_secret():
@@ -86,6 +89,9 @@ def create_access_token(
     # Create the token payload
     now = time.time()
     expires_at = now + (expiration_minutes * 60)
+    
+    # Generate a unique token ID
+    jti = secrets.token_hex(8)
 
     payload = {
         "sub": user_id,                  # JWT subject claim (user ID)
@@ -93,7 +99,7 @@ def create_access_token(
         "iat": now,                      # Issued at time
         "nbf": now,                      # Not valid before time
         "type": "access",                # Token type
-        "jti": secrets.token_hex(8)      # Unique token ID
+        "jti": jti                       # Unique token ID
     }
 
     # Add additional user data if provided
@@ -116,6 +122,9 @@ def create_access_token(
         # Handle bytes vs string for different jwt versions
         if isinstance(token, bytes):
             token = token.decode('utf-8')
+
+        # Track the token for this user
+        _track_user_token(user_id, jti, expires_at)
 
         logger.info(
             f"Created access token for user {user_id} (expires in {expiration_minutes} minutes)")
@@ -173,6 +182,9 @@ def create_refresh_token(
         # Handle bytes vs string for different jwt versions
         if isinstance(token, bytes):
             token = token.decode('utf-8')
+
+        # Track the token for this user
+        _track_user_token(user_id, jti, expires_at)
 
         logger.info(
             f"Created refresh token for user {user_id} (expires in {expires_days} days)")
@@ -410,6 +422,29 @@ def authenticate_with_token(token: str) -> AuthResult:
     )
 
 
+def _track_user_token(user_id: str, jti: str, expires_at: float) -> None:
+    """
+    Track a token for a specific user.
+
+    Args:
+        user_id: User ID
+        jti: JWT ID
+        expires_at: Token expiration timestamp
+    """
+    if not user_id or not jti:
+        return
+    
+    # Initialize user tokens set if it doesn't exist
+    if user_id not in _user_tokens:
+        _user_tokens[user_id] = set()
+    
+    # Add this token's JTI to the user's tokens
+    _user_tokens[user_id].add(jti)
+    
+    # Auto-cleanup: We could periodically clean up expired tokens
+    # but for simplicity, we'll leave that for future enhancement
+
+
 def blacklist_token_jti(jti: str) -> bool:
     """
     Add a token ID to the blacklist.
@@ -460,6 +495,59 @@ def blacklist_token(token: str) -> bool:
         return False
 
 
+def blacklist_all_user_tokens(user_id: str) -> int:
+    """
+    Blacklist all tokens for a specific user.
+
+    Args:
+        user_id: User ID to blacklist tokens for
+
+    Returns:
+        int: Number of tokens blacklisted
+    """
+    if not user_id or user_id not in _user_tokens:
+        logger.warning(f"No tokens found for user {user_id}")
+        return 0
+    
+    # Get all tokens for this user
+    user_token_jtis = _user_tokens.get(user_id, set())
+    
+    # Add all tokens to the blacklist
+    count = 0
+    for jti in user_token_jtis:
+        _token_blacklist.add(jti)
+        count += 1
+    
+    # Clear the user's token set
+    _user_tokens[user_id] = set()
+    
+    logger.info(f"Blacklisted {count} tokens for user {user_id}")
+    return count
+
+
+def extract_user_id_from_token(token: str) -> Optional[str]:
+    """
+    Extract the user ID from a token.
+
+    Args:
+        token: Token to extract user ID from
+
+    Returns:
+        Optional[str]: User ID or None if the token is invalid
+    """
+    try:
+        # Decode the token without verification to get the user ID
+        decoded = jwt.decode(
+            token,
+            options={"verify_signature": False}
+        )
+        
+        # Return the user ID
+        return decoded.get("sub")
+    except Exception:
+        return None
+
+
 def clear_blacklist() -> int:
     """
     Clear the token blacklist.
@@ -469,7 +557,8 @@ def clear_blacklist() -> int:
     """
     count = len(_token_blacklist)
     _token_blacklist.clear()
-    logger.info(f"Cleared {count} tokens from blacklist")
+    _user_tokens.clear()
+    logger.info(f"Cleared {count} tokens from blacklist and user token tracking")
     return count
 
 
@@ -500,9 +589,8 @@ def is_token_blacklisted(token: str) -> bool:
     except Exception:
         return False
 
+
 # For backward compatibility (legacy function)
-
-
 def refresh_token(token: str, expires_minutes: int = None) -> AuthResult:
     """
     Legacy function to refresh a JWT token with a new expiration time.
@@ -570,9 +658,8 @@ def refresh_token(token: str, expires_minutes: int = None) -> AuthResult:
         auth_type=payload.get("auth_type", "jwt")
     )
 
+
 # For backward compatibility (legacy function)
-
-
 def create_token(
     user_id: str,
     user_data: Dict[str, Any] = None,

@@ -1,17 +1,23 @@
-
 # api/auth/endpoints.py
 """
 Authentication API endpoints.
 This module provides FastAPI endpoints for authentication.
 """
 
+import logging
 from typing import Dict, Any, Optional
 
 from fastapi import APIRouter, Header, Request, HTTPException, status, Depends, Body
 
-from api.auth.jwt_handler import verify_token, blacklist_token
+from api.auth.jwt_handler import (
+    verify_token, blacklist_token, blacklist_all_user_tokens, extract_user_id_from_token
+)
 from api.auth.aws_sso import authenticate_with_aws_credentials
 from api.auth.middleware import auth_required
+
+# Configure logging
+logger = logging.getLogger("api.auth.endpoints")
+logger.setLevel(logging.INFO)
 
 # Create a router for authentication endpoints
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -60,66 +66,72 @@ async def get_user_info(user_info: Dict[str, Any] = Depends(auth_required)):
         **safe_user_info
     }
 
-@router.post("/logout",tags=['Yet to Complete'])
+@router.post("/logout")
 async def logout(
     request: Request,
-    authorization: str = Header(None),
-    refresh_token: str = Body(None, embed=True)
+    user_info: Dict[str, Any] = Depends(auth_required)
 ):
     """
-    Logout the current user by invalidating their tokens.
+    Logout the current user by invalidating all their tokens.
     
-    This endpoint invalidates the access token and optionally the refresh token
-    to prevent their future use.
+    This endpoint automatically invalidates all tokens for the authenticated user,
+    preventing their future use.
     
-    Args:
-        authorization: The authorization header containing the access token
-        refresh_token: The refresh token to invalidate (optional)
-        
     Returns:
         Dict: Logout result
     """
-    client_ip = request.client.host if request.client else "unknown"
-    user_id = "unknown"
-    tokens_revoked = 0
-    
-    # Extract the access token from the authorization header
-    access_token = None
-    if authorization:
-        parts = authorization.split()
-        if len(parts) == 2 and parts[0].lower() == "bearer":
-            access_token = parts[1]
-    
-    # Invalidate the access token if provided
-    if access_token:
-        # Validate the token to get the user ID
-        success, payload = verify_token(access_token)
-        if success and payload:
-            user_id = payload.get("sub", "unknown")
-            
-        # Blacklist the token regardless of validation result
-        if blacklist_token(access_token):
-            tokens_revoked += 1
-            # logger.info(f"Access token revoked for user {user_id} from {client_ip}")
-    
-    # Invalidate the refresh token if provided
-    if refresh_token:
-        # Validate the refresh token to confirm user ID
-        success, payload = verify_token(refresh_token)
-        if success and payload:
-            token_user_id = payload.get("sub")
-            if token_user_id:
-                user_id = token_user_id
+    try:
+        # Get user details
+        user_id = user_info.get("sub")
+        auth_type = user_info.get("auth_type")
+        client_ip = request.client.host if request.client else "unknown"
         
-        # Blacklist the refresh token
-        if blacklist_token(refresh_token):
-            tokens_revoked += 1
-            # logger.info(f"Refresh token revoked for user {user_id} from {client_ip}")
-    
-    return {
-        "success": True,
-        "message": "Logout successful",
-        "user_id": user_id,
-        "tokens_revoked": tokens_revoked
-    }
-
+        logger.info(f"Processing logout for user {user_id} ({auth_type}) from {client_ip}")
+        
+        # Get the token from the authorization header
+        auth_header = request.headers.get('Authorization', '')
+        token = None
+        if auth_header.startswith('Bearer '):
+            token = auth_header.replace('Bearer ', '')
+        
+        # If we have a token, blacklist it immediately
+        tokens_invalidated = 0
+        if token:
+            if blacklist_token(token):
+                tokens_invalidated += 1
+                logger.info(f"Current token invalidated for user {user_id}")
+        
+        # For JWT auth type, invalidate all tokens for this user
+        if auth_type == "jwt":
+            additional_tokens = blacklist_all_user_tokens(user_id)
+            tokens_invalidated += additional_tokens
+            logger.info(f"Invalidated {additional_tokens} additional tokens for user {user_id}")
+        
+        # For AWS SSO, we can't invalidate session tokens directly from our API
+        # We should inform the user to close their browser or log out from AWS Console
+        aws_sso_message = ""
+        if auth_type == "aws_sso":
+            aws_sso_message = "For complete AWS SSO logout, please also log out from your AWS Console session."
+        
+        return {
+            "success": True,
+            "message": f"Logout successful. {tokens_invalidated} tokens invalidated. {aws_sso_message}".strip(),
+            "user_id": user_id,
+            "tokens_invalidated": tokens_invalidated
+        }
+    except Exception as e:
+        logger.error(f"Error during logout: {e}")
+        
+        # Even if there's an error, try to blacklist the current token
+        try:
+            auth_header = request.headers.get('Authorization', '')
+            if auth_header.startswith('Bearer '):
+                token = auth_header.replace('Bearer ', '')
+                blacklist_token(token)
+        except Exception:
+            pass
+        
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing logout"
+        )
