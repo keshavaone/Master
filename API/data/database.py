@@ -296,7 +296,7 @@ class DatabaseHandler:
                 'Type': item.type,
                 'PII': encrypted_pii,
                 'created_at': datetime.now().isoformat(),
-                'created_by': user_id
+                'user': user_id.split(':')[-1]
             }
             
             # Put the item in the database

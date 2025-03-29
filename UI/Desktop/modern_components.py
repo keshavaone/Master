@@ -482,7 +482,7 @@ class CRUDHelper:
         # Validate _id for update and delete operations
         if operation in ('update', 'delete'):
             valid, error_msg = CRUDHelper.validate_required_fields(data, [
-                                                                   '_id'], logger)
+                                                                    '_id'], logger)
             if not valid:
                 if logger:
                     logger(f"Validation error for {operation}: {error_msg}")
@@ -497,67 +497,6 @@ class CRUDHelper:
                     logger(f"Validation error for create: {error_msg}")
                 return False, error_msg
 
-        # Try agent first (most direct)
-        if agent:
-            try:
-                if logger:
-                    logger(f"Using agent directly for {operation} operation")
-
-                # Call the appropriate method based on operation
-                if operation == 'create':
-                    response = agent.insert_new_data(data)
-                elif operation == 'read':
-                    response = agent.get_all_data()
-                elif operation == 'update':
-                    response = agent.update_one_data(data)
-                elif operation == 'delete':
-                    # Ensure we're passing a complete object for delete
-                    if '_id' in data:
-                        response = agent.delete_one_data(data)
-                    else:
-                        return False, "Missing _id field for delete operation"
-                else:
-                    return False, f"Unknown operation: {operation}"
-
-                # Handle response
-                if response is True:
-                    if logger:
-                        logger(f"{operation.capitalize()} operation successful")
-                    return True, {"message": f"{operation} successful"}
-                elif isinstance(response, dict) and 'error' not in response:
-                    if logger:
-                        logger(f"{operation.capitalize()} operation successful")
-                    return True, response
-                elif isinstance(response, Exception):
-                    error_msg = str(response)
-                    if logger:
-                        logger(f"Agent {operation} error: {error_msg}")
-                    # Continue to next method
-                elif isinstance(response, dict) and 'error' in response:
-                    error_msg = response.get('error', str(response))
-                    if logger:
-                        logger(f"Agent {operation} error: {error_msg}")
-                    # Continue to next method
-                else:
-                    # For delete operations, many kinds of responses could indicate success
-                    if operation == 'delete':
-                        if logger:
-                            logger(
-                                f"Agent {operation} returned non-standard response, assuming success: {response}")
-                        return True, {"message": "Delete operation completed", "response": response}
-                    else:
-                        if logger:
-                            logger(f"Agent {operation} returned: {response}")
-                        # If we got a non-error response, consider it successful
-                        return True, response
-            except Exception as e:
-                import traceback
-                if logger:
-                    logger(f"Agent {operation} error: {str(e)}")
-                    logger(f"Traceback: {traceback.format_exc()}")
-                # Continue to next method
-
-        # Try auth_service next
         if auth_service and hasattr(auth_service, 'make_authenticated_request'):
             try:
                 if logger:
@@ -571,13 +510,39 @@ class CRUDHelper:
                     'delete': 'DELETE'
                 }
 
-                # Handle async/sync methods
+                # Prepare API-compatible data with lowercase field names for FastAPI
+                api_data = None
+                if data is not None:
+                    # Only transform data for create/update operations
+                    if operation in ['create', 'update']:
+                        api_data = {}
+                        # Map capitalized field names to lowercase for API compatibility
+                        field_mapping = {
+                            'Category': 'category',
+                            'Type': 'type',
+                            'PII': 'pii'
+                        }
+                        
+                        # Copy all fields with appropriate mapping
+                        for key, value in data.items():
+                            if key in field_mapping:
+                                api_data[field_mapping[key]] = value
+                            else:
+                                api_data[key] = value
+                        
+                        if logger:
+                            logger(f"Transformed data fields for API compatibility: {list(api_data.keys())}")
+                    else:
+                        # For other operations, use data as-is
+                        api_data = data
+
+                # Handle endpoint and data preparation
                 if operation == 'read':
                     endpoint = "pii"
                     req_data = None
                 else:
                     endpoint = "pii"
-                    req_data = data
+                    req_data = api_data
 
                 # Check if method is async or sync
                 import inspect
@@ -650,11 +615,34 @@ class CRUDHelper:
                     'delete': 'DELETE'
                 }
 
+                # Prepare API-compatible data with lowercase field names
+                api_data = None
+                if data is not None:
+                    # Only transform data for create/update operations
+                    if operation in ['create', 'update']:
+                        api_data = {}
+                        # Map capitalized field names to lowercase for API compatibility
+                        field_mapping = {
+                            'Category': 'category',
+                            'Type': 'type',
+                            'PII': 'pii'
+                        }
+                        
+                        # Copy all fields with appropriate mapping
+                        for key, value in data.items():
+                            if key in field_mapping:
+                                api_data[field_mapping[key]] = value
+                            else:
+                                api_data[key] = value
+                    else:
+                        # For other operations, use data as-is
+                        api_data = data
+
                 # Make authenticated request
                 success, response_data = auth_manager.make_authenticated_request(
                     method=method_map[operation],
                     endpoint="pii",
-                    data=data if operation != 'read' else None
+                    data=api_data if operation != 'read' else None
                 )
 
                 if success:
@@ -691,7 +679,6 @@ class CRUDHelper:
             logger(f"Operation {operation} failed: {error_msg}")
 
         return False, error_msg
-
 
 """
 Enhanced ModernDataDialog for improved PII data display.
@@ -1222,8 +1209,68 @@ class EnhancedPIIDataCard(QFrame):
         except Exception as e:
             logger.error(f"Error opening URL: {e}")
 
+    # Find this method in EnhancedModernDataDialog class
+    def display_filtered_items(self):
+        """Display the filtered items with improved card layout."""
+        # Remove all existing widgets from the layout first
+        while self.cards_layout.count():
+            item = self.cards_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        # Show empty message if no items
+        if not self.filtered_items:
+            # Create a new empty message each time we need it
+            empty_message = QLabel("No data items found", self.cards_container)
+            empty_message.setAlignment(Qt.AlignCenter)
+            empty_message.setStyleSheet("""
+                color: #757575;
+                font-size: 16px;
+                padding: 40px;
+                background-color: #F5F5F5;
+                border: 1px dashed #BDBDBD;
+                border-radius: 8px;
+            """)
+            self.cards_layout.addWidget(empty_message)
+            self.cards_layout.addStretch()
+            return
+        
+        # Add cards for each item
+        for item in self.filtered_items:
+            card = EnhancedPIIDataCard(item, self)
+
+            # Connect signals
+            card.edit_clicked.connect(self.edit_item)
+            card.delete_clicked.connect(self.delete_item)
+            card.view_details_clicked.connect(self.view_item_details)
+
+            self.cards_layout.insertWidget(self.cards_layout.count() - 1, card)
+        
+    def clear_layout_safely(self, layout):
+        """
+        Safely clear all widgets from a layout without accessing them afterward.
+        This method is a safer alternative to clear_layout() when you need to
+        rebuild the entire UI.
+        """
+        if layout is None:
+            return
+
+        # Take all widgets out of the layout and delete them
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+            else:
+                # Might be a layout
+                self.clear_layout_safely(item.layout())
+                
     def clear_layout(self, layout):
-        """Safely clear all widgets from a layout."""
+        """
+        Clear all widgets from a layout.
+        CAUTION: Don't access widgets after clearing them with this method.
+        Consider using clear_layout_safely() if rebuilding the entire UI.
+        """
         if layout is None:
             return
 
@@ -1233,9 +1280,8 @@ class EnhancedPIIDataCard(QFrame):
             if widget is not None:
                 widget.deleteLater()
             else:
-                child_layout = item.layout()
-                if child_layout is not None:
-                    self.clear_layout(child_layout)
+                # Might be a layout
+                self.clear_layout(item.layout())
 
     def toggle_expanded_view(self):
         """Toggle between expanded and collapsed view."""
@@ -1286,6 +1332,7 @@ class EnhancedModernDataDialog(QDialog):
         self.auth_service = None
         self.agent = None
         self.current_search_text = ""
+        self.empty_message = None  # Initialize as None
 
         # Apply styling if StandardTheme is available
         try:
@@ -1330,7 +1377,33 @@ class EnhancedModernDataDialog(QDialog):
 
         # Footer section with actions
         self.setup_footer_section(main_layout)
+        
+    def setup_content_area(self, parent):
+        """Set up the main content area for data items."""
+        self.content_widget = QWidget(parent)
+        self.content_widget.setObjectName("contentArea")
 
+        content_layout = QVBoxLayout(self.content_widget)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+
+        # Create a scrollable area for data cards
+        scroll_area = QScrollArea(self.content_widget)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.NoFrame)
+
+        # Container for data cards
+        self.cards_container = QWidget(scroll_area)
+        self.cards_layout = QVBoxLayout(self.cards_container)
+        self.cards_layout.setContentsMargins(5, 5, 5, 5)
+        self.cards_layout.setSpacing(15)
+
+        # Add stretch to push cards to the top
+        self.cards_layout.addStretch()
+
+        scroll_area.setWidget(self.cards_container)
+        content_layout.addWidget(scroll_area)
+        
     def setup_header_section(self, parent_layout):
         """Create the header section with search and filters."""
         header = QWidget(self)
@@ -1522,46 +1595,6 @@ class EnhancedModernDataDialog(QDialog):
 
         return category_widget
 
-    def setup_content_area(self, parent):
-        """Set up the main content area for data items."""
-        self.content_widget = QWidget(parent)
-        self.content_widget.setObjectName("contentArea")
-
-        content_layout = QVBoxLayout(self.content_widget)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(0)
-
-        # Create a scrollable area for data cards
-        scroll_area = QScrollArea(self.content_widget)
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setFrameShape(QFrame.NoFrame)
-
-        # Container for data cards
-        self.cards_container = QWidget(scroll_area)
-        self.cards_layout = QVBoxLayout(self.cards_container)
-        self.cards_layout.setContentsMargins(5, 5, 5, 5)
-        self.cards_layout.setSpacing(15)
-
-        # Add empty state message (hidden initially)
-        self.empty_message = QLabel(
-            "No data items found", self.cards_container)
-        self.empty_message.setAlignment(Qt.AlignCenter)
-        self.empty_message.setStyleSheet("""
-            color: #757575;
-            font-size: 16px;
-            padding: 40px;
-            background-color: #F5F5F5;
-            border: 1px dashed #BDBDBD;
-            border-radius: 8px;
-        """)
-        self.empty_message.setVisible(False)
-        self.cards_layout.addWidget(self.empty_message)
-
-        # Add stretch to push cards to the top
-        self.cards_layout.addStretch()
-
-        scroll_area.setWidget(self.cards_container)
-        content_layout.addWidget(scroll_area)
 
     def setup_footer_section(self, parent_layout):
         """Create the footer section with action buttons."""
@@ -1825,20 +1858,30 @@ class EnhancedModernDataDialog(QDialog):
             # No filters active
             self.status_label.setText(f"{len(self.data_items)} total items")
 
+    
     def display_filtered_items(self):
         """Display the filtered items with improved card layout."""
-        # Clear existing cards
-        self.clear_layout(self.cards_layout)
+        # Clear existing cards but handle our empty_message specially
+        self.clear_layout_safely(self.cards_layout)
 
         # Show empty message if no items
         if not self.filtered_items:
-            self.empty_message.setVisible(True)
-            self.cards_layout.addWidget(self.empty_message)
+            # Create a fresh empty message
+            empty_message = QLabel("No data items found", self.cards_container)
+            empty_message.setAlignment(Qt.AlignCenter)
+            empty_message.setStyleSheet("""
+                color: #757575;
+                font-size: 16px;
+                padding: 40px;
+                background-color: #F5F5F5;
+                border: 1px dashed #BDBDBD;
+                border-radius: 8px;
+            """)
+            self.cards_layout.addWidget(empty_message)
+            self.empty_message = empty_message  # Update reference
             self.cards_layout.addStretch()
             return
-        else:
-            self.empty_message.setVisible(False)
-
+        
         # Add cards for each item
         for item in self.filtered_items:
             card = EnhancedPIIDataCard(item, self)
@@ -1850,8 +1893,31 @@ class EnhancedModernDataDialog(QDialog):
 
             self.cards_layout.insertWidget(self.cards_layout.count() - 1, card)
 
+    def clear_layout_safely(self, layout):
+        """
+        Safely clear all widgets from a layout without accessing them afterward.
+        This method is a safer alternative to clear_layout() when you need to
+        rebuild the entire UI.
+        """
+        if layout is None:
+            return
+
+        # Take all widgets out of the layout and delete them
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+            else:
+                # Might be a layout
+                self.clear_layout_safely(item.layout())
+            
     def clear_layout(self, layout):
-        """Safely clear all widgets from a layout."""
+        """
+        Clear all widgets from a layout.
+        CAUTION: Don't access widgets after clearing them with this method.
+        Consider using clear_layout_safely() if rebuilding the entire UI.
+        """
         if layout is None:
             return
 
@@ -1909,12 +1975,12 @@ class EnhancedModernDataDialog(QDialog):
             return
 
         # Show progress dialog with better styling
-        progress_dialog = QMessageBox(self)
-        progress_dialog.setWindowTitle("Updating Data")
-        progress_dialog.setText("Updating data item...")
-        progress_dialog.setStandardButtons(QMessageBox.NoButton)
-        progress_dialog.show()
-        QApplication.processEvents()
+        # progress_dialog = QMessageBox(self)
+        # progress_dialog.setWindowTitle("Updating Data")
+        # progress_dialog.setText("Updating data item...")
+        # progress_dialog.setStandardButtons(QMessageBox.NoButton)
+        # progress_dialog.show()
+        # QApplication.processEvents()
 
         try:
             # Use CRUD helper to update the item
@@ -1927,7 +1993,7 @@ class EnhancedModernDataDialog(QDialog):
             )
 
             # Close progress dialog
-            progress_dialog.close()
+            # progress_dialog.close()
 
             if success:
                 QMessageBox.information(
@@ -1941,7 +2007,7 @@ class EnhancedModernDataDialog(QDialog):
                     self, "Error", f"Failed to update item: {response}"
                 )
         except Exception as e:
-            progress_dialog.close()
+            # progress_dialog.close()
             QMessageBox.critical(
                 self, "Error", f"Error updating item: {str(e)}"
             )
@@ -2342,16 +2408,16 @@ class EnhancedModernDataDialog(QDialog):
             return
 
         # Update status
-        self.status_label.setText("Adding new item...")
-        QApplication.processEvents()
+        # self.status_label.setText("Adding new item...")
+        # QApplication.processEvents()
 
         # Show progress dialog
-        progress_dialog = QMessageBox(self)
-        progress_dialog.setWindowTitle("Adding Data")
-        progress_dialog.setText("Adding new data item...")
-        progress_dialog.setStandardButtons(QMessageBox.NoButton)
-        progress_dialog.show()
-        QApplication.processEvents()
+        # progress_dialog = QMessageBox(self)
+        # progress_dialog.setWindowTitle("Adding Data")
+        # progress_dialog.setText("Adding new data item...")
+        # progress_dialog.setStandardButtons(QMessageBox.NoButton)
+        # progress_dialog.show()
+        # QApplication.processEvents()
 
         try:
             # Use CRUD helper to create the item
@@ -2364,7 +2430,7 @@ class EnhancedModernDataDialog(QDialog):
             )
 
             # Close progress dialog
-            progress_dialog.close()
+            # progress_dialog.close()
 
             if success:
                 QMessageBox.information(
@@ -2384,7 +2450,7 @@ class EnhancedModernDataDialog(QDialog):
                 )
                 self.status_label.setText("Failed to add item")
         except Exception as e:
-            progress_dialog.close()
+            # progress_dialog.close()
             QMessageBox.critical(
                 self, "Error", f"Error adding item: {str(e)}"
             )

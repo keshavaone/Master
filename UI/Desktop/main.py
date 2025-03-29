@@ -22,7 +22,7 @@ from PyQt5.QtWidgets import (
     QMessageBox, QDialog, QMenu, QTabWidget, 
     QStatusBar, QProgressDialog, QFrame, QGraphicsDropShadowEffect, 
     QToolTip, QApplication, QSplitter, QGroupBox,
-    QProgressBar, QStyle
+    QProgressBar, QStyle, QLineEdit, QComboBox
 )
 from PyQt5.QtGui import QColor
 from PyQt5.QtCore import Qt, QTimer, QDateTime, QPoint, QRect
@@ -589,211 +589,9 @@ class GuardMainWindow(QMainWindow):
         # Log initialization
         timestamp = QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
         self.update_log(timestamp, "Application initialized")
-        
-    def setup_header_section(self, parent_layout):
-        """Set up the header section with logo and welcome message."""
-        header_widget = QWidget()
-        header_layout = QHBoxLayout(header_widget)
-        header_layout.setContentsMargins(5, 5, 5, 15)
-        
-        # App title with icon (placeholder)
-        title_layout = QVBoxLayout()
-        
-        app_name_label = QLabel("GUARD", self)
-        app_name_label.setStyleSheet("""
-            font-family: 'Segoe UI', Arial, sans-serif;
-            font-size: 24px;
-            font-weight: bold;
-            color: #1976D2;
-        """)
-        
-        app_subtitle = QLabel("Secure PII Data Management", self)
-        app_subtitle.setStyleSheet("""
-            font-family: 'Segoe UI', Arial, sans-serif;
-            font-size: 14px;
-            color: #757575;
-        """)
-        
-        title_layout.addWidget(app_name_label)
-        title_layout.addWidget(app_subtitle)
-        header_layout.addLayout(title_layout)
-        
-        # Add stretch to push remaining elements to the right
-        header_layout.addStretch()
-        
-        # Welcome text that appears after login
-        self.welcome_text = QLabel("", self)
-        self.welcome_text.setStyleSheet("""
-            font-family: 'Segoe UI', Arial, sans-serif;
-            font-size: 14px;
-            color: #424242;
-        """)
-        self.welcome_text.setVisible(False)
-        header_layout.addWidget(self.welcome_text)
-        
-        # Add authentication button that will be replaced after login
-        self.auth_button_container = QWidget()
-        auth_button_layout = QHBoxLayout(self.auth_button_container)
-        auth_button_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.btn_connect_server = QPushButton('Connect to Server', self)
-        self.btn_connect_server.setStyleSheet(StandardTheme.get_button_style('primary', 'medium'))
-        self.btn_connect_server.setToolTip('Click to authenticate and connect to the server')
-        self.btn_connect_server.setCursor(Qt.PointingHandCursor)
-        self.btn_connect_server.clicked.connect(self.show_auth_options)
-        auth_button_layout.addWidget(self.btn_connect_server)
-        
-        header_layout.addWidget(self.auth_button_container)
-        
-        # Add header to main layout
-        parent_layout.addWidget(header_widget)
-        
-        # Add a separator line
-        separator = QFrame()
-        separator.setFrameShape(QFrame.HLine)
-        separator.setFrameShadow(QFrame.Sunken)
-        separator.setStyleSheet("background-color: #E0E0E0;")
-        parent_layout.addWidget(separator)
-
-    def setup_data_management_tab(self):
-        """Set up the PII data management tab."""
-        # Create tab widget and layout
-        self.data_tab = QWidget()
-        data_layout = QVBoxLayout(self.data_tab)
-        data_layout.setContentsMargins(10, 15, 10, 10)
-        data_layout.setSpacing(15)
-        
-        # Split view - Categories on left, Details on right
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.setChildrenCollapsible(False)
-        
-        # Left panel - Categories
-        left_panel = QWidget()
-        left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Category panel header
-        category_header = QLabel("Data Categories", left_panel)
-        category_header.setStyleSheet(StandardTheme.get_label_style('primary', 'large', True))
-        left_layout.addWidget(category_header)
-        
-        # Categories table
-        self.category_table = QTableWidget(0, 1, left_panel)
-        self.category_table.setHorizontalHeaderLabels(["Category"])
-        self.category_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.category_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.category_table.setSelectionMode(QTableWidget.SingleSelection)
-        self.category_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.category_table.setAlternatingRowColors(True)
-        self.category_table.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.category_table.customContextMenuRequested.connect(self.show_category_menu)
-        self.category_table.itemSelectionChanged.connect(self.on_category_selected)
-        self.category_table.setVisible(False)
-        self.category_table.setStyleSheet(StandardTheme.get_table_style())
-        left_layout.addWidget(self.category_table, 1)  # Give stretch priority
-        
-        # Left panel buttons
-        left_buttons = QHBoxLayout()
-        
-        self.btn_refresh_categories = QPushButton("Refresh", left_panel)
-        self.btn_refresh_categories.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
-        self.btn_refresh_categories.setStyleSheet(StandardTheme.get_button_style('secondary', 'small'))
-        self.btn_refresh_categories.setCursor(Qt.PointingHandCursor)
-        self.btn_refresh_categories.clicked.connect(self.refresh_categories)
-        self.btn_refresh_categories.setVisible(False)
-        left_buttons.addWidget(self.btn_refresh_categories)
-        
-        left_buttons.addStretch()
-        left_layout.addLayout(left_buttons)
-        
-        # Right panel - Data view
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Placeholder when no category is selected
-        self.data_placeholder = QLabel("Select a category to view data items", right_panel)
-        self.data_placeholder.setAlignment(Qt.AlignCenter)
-        self.data_placeholder.setStyleSheet("""
-            font-family: 'Segoe UI', Arial, sans-serif;
-            font-size: 14px;
-            color: #9E9E9E;
-            padding: 40px;
-            background-color: #F5F5F5;
-            border: 1px dashed #BDBDBD;
-            border-radius: 8px;
-        """)
-        self.data_placeholder.setVisible(False)
-        right_layout.addWidget(self.data_placeholder)
-        
-        # Right panel action buttons
-        right_buttons = QHBoxLayout()
-        
-        self.btn_display_data = QPushButton("Display All Data", right_panel)
-        self.btn_display_data.setIcon(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
-        self.btn_display_data.setStyleSheet(StandardTheme.get_button_style('primary', 'medium'))
-        self.btn_display_data.setCursor(Qt.PointingHandCursor)
-        self.btn_display_data.clicked.connect(self.show_data_window)
-        self.btn_display_data.setVisible(False)
-        right_buttons.addWidget(self.btn_display_data)
-        
-        self.btn_add_entry = QPushButton("Add New Entry", right_panel)
-        self.btn_add_entry.setIcon(self.style().standardIcon(QStyle.SP_FileDialogNewFolder))
-        self.btn_add_entry.setStyleSheet(StandardTheme.get_button_style('success', 'medium'))
-        self.btn_add_entry.setCursor(Qt.PointingHandCursor)
-        self.btn_add_entry.clicked.connect(self.add_new_entry)
-        self.btn_add_entry.setVisible(False)
-        right_buttons.addWidget(self.btn_add_entry)
-        
-        right_buttons.addStretch()
-        right_layout.addLayout(right_buttons)
-        
-        # Add panels to splitter
-        splitter.addWidget(left_panel)
-        splitter.addWidget(right_panel)
-        splitter.setStretchFactor(0, 1)  # Left panel gets 1/3
-        splitter.setStretchFactor(1, 2)  # Right panel gets 2/3
-        data_layout.addWidget(splitter, 1)  # Give stretch priority
-        
-        # Log section
-        log_group = QGroupBox("Activity Log", self.data_tab)
-        log_group.setStyleSheet("""
-            QGroupBox {
-                font-family: 'Segoe UI', Arial, sans-serif;
-                font-size: 14px;
-                font-weight: bold;
-                border: 1px solid #E0E0E0;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 8px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-                color: #1976D2;
-            }
-        """)
-        log_layout = QVBoxLayout(log_group)
-        
-        # Log table
-        self.log_table = QTableWidget(0, 2, log_group)
-        self.log_table.setHorizontalHeaderLabels(["Timestamp", "Action/Task Performed"])
-        self.log_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.log_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.log_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.log_table.setAlternatingRowColors(True)
-        self.log_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.log_table.setVisible(False)
-        self.log_table.setStyleSheet(StandardTheme.get_table_style())
-        log_layout.addWidget(self.log_table)
-        
-        # Add log section to layout
-        data_layout.addWidget(log_group)
-        
-        # Add tab to tab widget
-        self.tab_widget.addTab(self.data_tab, "Data Management")
-
+    
+    
+   
     def setup_session_manager(self):
         """Set up the session manager and connect signals."""
         # Create session manager with 1-hour session timeout
@@ -1119,31 +917,6 @@ class GuardMainWindow(QMainWindow):
         self.update_log(timestamp, "Connected to server")
         self.update_log(timestamp, "Application ready")
 
-    def show_authenticated_ui(self):
-        """Update UI to show authenticated state."""
-        # Hide connect button
-        self.btn_connect_server.setVisible(False)
-        
-        # Update auth button container with logout button
-        logout_button = QPushButton("Logout", self)
-        logout_button.setIcon(self.style().standardIcon(QStyle.SP_DialogCloseButton))
-        logout_button.setStyleSheet(StandardTheme.get_button_style('outline'))
-        logout_button.setCursor(Qt.PointingHandCursor)
-        logout_button.clicked.connect(self.logout_user)
-        self.auth_button_container.layout().addWidget(logout_button)
-        
-        # Show welcome message
-        user_id = self.session_manager.user_id or "User"
-        self.welcome_text.setText(f"Welcome, {user_id}")
-        self.welcome_text.setVisible(True)
-        
-        # Show data components
-        self.category_table.setVisible(True)
-        self.log_table.setVisible(True)
-        self.btn_display_data.setVisible(True)
-        self.btn_add_entry.setVisible(True)
-        self.btn_refresh_categories.setVisible(True)
-        self.data_placeholder.setVisible(True)
 
     def fetch_initial_data(self):
         """Fetch initial data from the server."""
@@ -1213,19 +986,118 @@ class GuardMainWindow(QMainWindow):
                 f"Error fetching data: {str(e)}"
             )
 
+    
+
+    def fetch_latest_data(self):
+        """Fetch the latest data and update displays with improved handling."""
+        try:
+            # Show a subtle progress indication in status bar
+            self.statusBar.showMessage("Fetching data from server...", 2000)
+            
+            # Get fresh data
+            if not hasattr(self, 'api_client') or self.api_client is None:
+                self.logger.error("API client not available. Please connect to the server first.")
+                self.statusBar.showMessage("API client not available. Please connect to the server.", 3000)
+                return None
+                
+            success, data = self.api_client.sync_get_pii_data()
+            
+            if success:
+                # Log the data received to help debug
+                self.logger.info(f"Data received: {len(data) if isinstance(data, list) else 'non-list data'}")
+                
+                # Convert to DataFrame format if needed
+                if isinstance(data, list):
+                    if not data:  # Empty list
+                        self.logger.warning("Received empty data list from server")
+                        self.statusBar.showMessage("No data found on server", 3000)
+                        return pd.DataFrame()  # Return empty DataFrame
+                        
+                    df = pd.DataFrame(data)
+                elif isinstance(data, pd.DataFrame):
+                    df = data
+                else:
+                    # Try to convert to list if it's not already one
+                    try:
+                        self.logger.warning(f"Unexpected data type: {type(data)}. Attempting conversion.")
+                        data_list = list(data) if hasattr(data, '__iter__') else [data]
+                        df = pd.DataFrame(data_list)
+                    except Exception as e:
+                        self.logger.error(f"Failed to convert data to DataFrame: {str(e)}")
+                        df = pd.DataFrame([data] if data else [])
+                
+                # Check if DataFrame has expected columns
+                if 'Category' not in df.columns or 'Type' not in df.columns:
+                    self.logger.warning(f"Data missing required columns. Available columns: {df.columns.tolist()}")
+                    # Try to fix column names if possible
+                    if '_id' in df.columns:  # This indicates we have some data
+                        # Look for alternate column names
+                        for col in df.columns:
+                            if col.lower() == 'category':
+                                df['Category'] = df[col]
+                            elif col.lower() == 'type':
+                                df['Type'] = df[col]
+                
+                # Update category table
+                self.populate_category_table(df)
+                
+                # Find any open ModernDataDialog instances and update them
+                for dialog in QApplication.topLevelWidgets():
+                    if hasattr(dialog, 'set_data') and callable(dialog.set_data):
+                        try:
+                            dialog.set_data(df.to_dict(orient='records'))
+                        except Exception as dialog_err:
+                            self.logger.error(f"Error updating dialog: {str(dialog_err)}")
+                
+                # Log the refresh
+                timestamp = QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
+                self.update_log(timestamp, f"Data refreshed successfully: {len(df)} items")
+                return df
+            else:
+                # Log the error and show message
+                self.logger.error(f"Error fetching data: {data}")
+                error_msg = str(data) if data else "Unknown error"
+                self.statusBar.showMessage(f"Error fetching data: {error_msg}", 3000)
+                
+                # Show error dialog for better visibility
+                QMessageBox.warning(
+                    self,
+                    "Data Fetch Error",
+                    f"Failed to fetch data from server: {error_msg}"
+                )
+                return None
+        except Exception as e:
+            self.logger.error(f"Error refreshing data: {str(e)}")
+            self.statusBar.showMessage(f"Error refreshing data: {str(e)}", 3000)
+            
+            # Show error dialog
+            QMessageBox.warning(
+                self,
+                "Data Refresh Error",
+                f"An error occurred while refreshing data: {str(e)}"
+            )
+            return None
+
     def populate_category_table(self, data):
         """
-        Populate the category table with unique categories.
+        Populate the category table with unique categories with improved handling.
         
         Args:
             data (DataFrame): Data to populate the table with
         """
+        if data is None or data.empty:
+            # Clear the table and show a message
+            self.category_table.setRowCount(0)
+            self.data_placeholder.setText("No data available. Please connect to the server.")
+            self.data_placeholder.setVisible(True)
+            return
+            
         if 'Category' not in data.columns:
-            QMessageBox.warning(
-                self,
-                "Data Error",
-                "Category column missing in data"
-            )
+            self.logger.warning("Category column missing in data")
+            # Clear the table and show a message
+            self.category_table.setRowCount(0)
+            self.data_placeholder.setText("Data format error: Category column missing")
+            self.data_placeholder.setVisible(True)
             return
         
         # Get unique categories and count items in each
@@ -1249,6 +1121,12 @@ class GuardMainWindow(QMainWindow):
             category_item.setData(Qt.UserRole, category)
             
             self.category_table.setItem(row, 0, category_item)
+        
+        # Update data placeholder visibility
+        self.data_placeholder.setVisible(False)
+        
+        # Log success
+        self.logger.info(f"Populated category table with {len(categories)} categories")
 
     def show_data_window(self):
         """
@@ -1257,7 +1135,7 @@ class GuardMainWindow(QMainWindow):
         # Check authentication first
         if not hasattr(self, 'auth_service') or not self.auth_service.is_authenticated():
             QMessageBox.warning(self, "Authentication Required", 
-                               "You must be connected to the server to view data.")
+                            "You must be connected to the server to view data.")
             return
         
         try:
@@ -1288,11 +1166,34 @@ class GuardMainWindow(QMainWindow):
             
             # Get data with proper error handling
             try:
+                # Make sure API client is available
+                if not hasattr(self, 'api_client') or self.api_client is None:
+                    progress.close()
+                    QMessageBox.warning(
+                        self, 
+                        "Not Connected", 
+                        "API client not available. Please connect to the server first."
+                    )
+                    return
+                    
                 success, data = self.api_client.sync_get_pii_data()
-                progress.setValue(80)
+                progress.setValue(70)
                 QApplication.processEvents()
                 
                 if success:
+                    # Make sure we actually got data
+                    if not data:
+                        progress.close()
+                        QMessageBox.information(
+                            self,
+                            "No Data",
+                            "No data items found on the server."
+                        )
+                        return
+                        
+                    # Debug log the data structure
+                    self.logger.info(f"Data type: {type(data)}, Content preview: {str(data)[:100]}...")
+                    
                     # Ensure we have a list of items
                     if isinstance(data, pd.DataFrame):
                         data_list = data.to_dict(orient='records')
@@ -1303,6 +1204,16 @@ class GuardMainWindow(QMainWindow):
                             data_list = [data] if data else []
                     else:
                         data_list = data
+                    
+                    # Make sure we have data after conversion
+                    if not data_list:
+                        progress.close()
+                        QMessageBox.information(
+                            self,
+                            "No Data",
+                            "No data items found on the server."
+                        )
+                        return
                     
                     # Set the data in the dialog
                     data_dialog.set_data(data_list)
@@ -1318,10 +1229,11 @@ class GuardMainWindow(QMainWindow):
                     self.update_log(timestamp, f"Successfully displayed {len(data_list)} data items")
                 else:
                     progress.close()
+                    error_msg = str(data) if data else "Unknown error"
                     QMessageBox.warning(
                         self, 
                         "Data Retrieval Error", 
-                        f"Failed to retrieve data from server: {data}"
+                        f"Failed to retrieve data from server: {error_msg}"
                     )
             except Exception as e:
                 progress.close()
@@ -1338,6 +1250,60 @@ class GuardMainWindow(QMainWindow):
                 self,
                 "Application Error",
                 f"An unexpected error occurred: {str(e)}"
+            )
+            
+    def refresh_categories(self):
+        """Refresh the category list from the server with improved feedback."""
+        try:
+            # Show progress dialog for better feedback
+            progress = QProgressDialog("Refreshing data from server...", None, 0, 100, self)
+            progress.setWindowTitle("Refreshing Data")
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setValue(10)
+            progress.show()
+            QApplication.processEvents()
+            
+            # Check API client availability
+            if not hasattr(self, 'api_client') or self.api_client is None:
+                progress.close()
+                QMessageBox.warning(
+                    self,
+                    "Connection Error",
+                    "API client is not available. Please connect to the server first."
+                )
+                return
+                
+            progress.setValue(30)
+            QApplication.processEvents()
+            
+            # Fetch the latest data
+            df = self.fetch_latest_data()
+            progress.setValue(80)
+            QApplication.processEvents()
+            
+            # Update category table directly from the dataframe if available
+            if df is not None and not df.empty:
+                self.populate_category_table(df)
+                progress.setValue(100)
+                progress.close()
+                
+                # Show success message
+                self.statusBar.showMessage("Data refreshed successfully", 3000)
+            else:
+                progress.close()
+                self.statusBar.showMessage("Failed to refresh data", 3000)
+                
+        except Exception as e:
+            if 'progress' in locals():
+                progress.close()
+                
+            self.logger.error(f"Error refreshing categories: {str(e)}")
+            self.statusBar.showMessage(f"Error refreshing data: {str(e)}", 3000)
+            
+            QMessageBox.warning(
+                self,
+                "Refresh Error",
+                f"Error refreshing data: {str(e)}"
             )
 
     def add_new_entry(self):
@@ -1445,60 +1411,7 @@ class GuardMainWindow(QMainWindow):
                 f"An unexpected error occurred: {str(e)}"
             )
 
-    def fetch_latest_data(self):
-        """Fetch the latest data and update displays."""
-        try:
-            # Get fresh data
-            success, data = self.api_client.sync_get_pii_data()
-            
-            if success:
-                # Convert to DataFrame format if needed
-                if isinstance(data, list):
-                    df = pd.DataFrame(data)
-                elif isinstance(data, pd.DataFrame):
-                    df = data
-                else:
-                    # Try to convert to list if it's not already one
-                    try:
-                        data_list = list(data) if hasattr(data, '__iter__') else [data]
-                        df = pd.DataFrame(data_list)
-                    except:
-                        df = pd.DataFrame([data] if data else [])
-                
-                # Update category table
-                self.populate_category_table(df)
-                
-                # Find any open ModernDataDialog instances and update them
-                for dialog in self.findChildren(ModernDataDialog):
-                    dialog.set_data(df.to_dict(orient='records'))
-                
-                # Log the refresh
-                timestamp = QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
-                self.update_log(timestamp, "Data refreshed successfully")
-                return df
-            else:
-                self.logger.warning(f"Error fetching data during refresh: {data}")
-                return None
-        except Exception as e:
-            self.logger.error(f"Error refreshing data: {str(e)}")
-            return None
-
-    def refresh_categories(self):
-        """Refresh the category list from the server."""
-        try:
-            # Show subtle progress indication in status bar
-            self.statusBar.showMessage("Refreshing data...", 2000)
-            
-            # Fetch the latest data
-            df = self.fetch_latest_data()
-            
-            # Update category table directly from the dataframe
-            if df is not None and not df.empty:
-                self.populate_category_table(df)
-        except Exception as e:
-            self.logger.error(f"Error refreshing categories: {str(e)}")
-            self.statusBar.showMessage(f"Error refreshing data: {str(e)}", 3000)
-
+    
     def on_category_selected(self):
         """Handle selection in the category table."""
         selected_items = self.category_table.selectedItems()
@@ -1733,9 +1646,614 @@ class GuardMainWindow(QMainWindow):
             "User interface reset to initial state"
         )
 
+    def handle_session_expired(self):
+        """Handle session expiration."""
+        timestamp = QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
+        self.update_log(timestamp, "Session expired")
+        
+        QMessageBox.warning(
+            self,
+            "Session Expired",
+            "Your session has expired. Please log in again."
+        )
+        
+        # Force logout
+        self.logout_user()
+    # Add these methods to the GuardMainWindow class
+
+    def setup_header_section(self, parent_layout):
+        """Set up the header section with logo and welcome message."""
+        header_widget = QWidget()
+        header_layout = QHBoxLayout(header_widget)
+        header_layout.setContentsMargins(5, 5, 5, 15)
+        
+        # App title with icon (placeholder)
+        title_layout = QVBoxLayout()
+        
+        app_name_label = QLabel("GUARD", self)
+        app_name_label.setStyleSheet("""
+            font-family: 'Segoe UI', Arial, sans-serif;
+            font-size: 24px;
+            font-weight: bold;
+            color: #1976D2;
+        """)
+        
+        app_subtitle = QLabel("Secure PII Data Management", self)
+        app_subtitle.setStyleSheet("""
+            font-family: 'Segoe UI', Arial, sans-serif;
+            font-size: 14px;
+            color: #757575;
+        """)
+        
+        title_layout.addWidget(app_name_label)
+        title_layout.addWidget(app_subtitle)
+        header_layout.addLayout(title_layout)
+        
+        # Add stretch to push remaining elements to the right
+        header_layout.addStretch()
+        
+        # Add activity log button
+        self.log_button = QPushButton("View Activity Log", self)
+        try:
+            self.log_button.setStyleSheet(StandardTheme.get_button_style('info', 'medium'))
+        except:
+            self.log_button.setStyleSheet("""
+                QPushButton {
+                    background-color: #2196F3;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 6px 12px;
+                }
+                QPushButton:hover {
+                    background-color: #1976D2;
+                }
+            """)
+        self.log_button.setIcon(self.style().standardIcon(QStyle.SP_FileDialogInfoView))
+        self.log_button.setCursor(Qt.PointingHandCursor)
+        self.log_button.clicked.connect(self.show_activity_log)
+        self.log_button.setVisible(False)  # Initially hidden until authenticated
+        header_layout.addWidget(self.log_button)
+        
+        # Welcome text that appears after login
+        self.welcome_text = QLabel("", self)
+        self.welcome_text.setStyleSheet("""
+            font-family: 'Segoe UI', Arial, sans-serif;
+            font-size: 14px;
+            color: #424242;
+        """)
+        self.welcome_text.setVisible(False)
+        header_layout.addWidget(self.welcome_text)
+        
+        # Add authentication button that will be replaced after login
+        self.auth_button_container = QWidget()
+        auth_button_layout = QHBoxLayout(self.auth_button_container)
+        auth_button_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.btn_connect_server = QPushButton('Connect to Server', self)
+        self.btn_connect_server.setStyleSheet(StandardTheme.get_button_style('primary', 'medium'))
+        self.btn_connect_server.setToolTip('Click to authenticate and connect to the server')
+        self.btn_connect_server.setCursor(Qt.PointingHandCursor)
+        self.btn_connect_server.clicked.connect(self.show_auth_options)
+        auth_button_layout.addWidget(self.btn_connect_server)
+        
+        header_layout.addWidget(self.auth_button_container)
+        
+        # Add header to main layout
+        parent_layout.addWidget(header_widget)
+        
+        # Add a separator line
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setFrameShadow(QFrame.Sunken)
+        separator.setStyleSheet("background-color: #E0E0E0;")
+        parent_layout.addWidget(separator)
+
+    def setup_log_tab(self):
+        """Set up a dedicated tab for activity logs with enhanced features."""
+        # Create the log tab
+        self.log_tab = QWidget()
+        log_layout = QVBoxLayout(self.log_tab)
+        log_layout.setContentsMargins(15, 15, 15, 15)
+        log_layout.setSpacing(15)
+        
+        # Create header with title and controls
+        header_layout = QHBoxLayout()
+        
+        # Title
+        log_title = QLabel("Activity Log", self.log_tab)
+        log_title.setStyleSheet("""
+            font-size: 18px;
+            font-weight: bold;
+            color: #1976D2;
+        """)
+        header_layout.addWidget(log_title)
+        
+        # Add filter and search controls
+        search_layout = QHBoxLayout()
+        search_label = QLabel("Search:", self.log_tab)
+        self.log_search = QLineEdit(self.log_tab)
+        self.log_search.setPlaceholderText("Search logs...")
+        self.log_search.setClearButtonEnabled(True)
+        self.log_search.textChanged.connect(self.filter_logs)
+        search_layout.addWidget(search_label)
+        search_layout.addWidget(self.log_search, 1)  # Give stretch priority
+        
+        # Date filter
+        date_label = QLabel("Date:", self.log_tab)
+        self.log_date_filter = QComboBox(self.log_tab)
+        self.log_date_filter.addItems(["All Dates", "Today", "Yesterday", "Last 7 Days"])
+        self.log_date_filter.currentTextChanged.connect(self.filter_logs)
+        search_layout.addWidget(date_label)
+        search_layout.addWidget(self.log_date_filter)
+        
+        header_layout.addLayout(search_layout)
+        header_layout.addStretch()
+        
+        # Add refresh and clear buttons
+        buttons_layout = QHBoxLayout()
+        
+        # Refresh button
+        refresh_log_button = QPushButton("Refresh", self.log_tab)
+        refresh_log_button.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
+        refresh_log_button.clicked.connect(self.refresh_logs)
+        try:
+            refresh_log_button.setStyleSheet(StandardTheme.get_button_style('secondary', 'small'))
+        except:
+            pass
+        buttons_layout.addWidget(refresh_log_button)
+        
+        # Export button
+        export_log_button = QPushButton("Export", self.log_tab)
+        export_log_button.setIcon(self.style().standardIcon(QStyle.SP_DialogSaveButton))
+        export_log_button.clicked.connect(self.export_logs)
+        try:
+            export_log_button.setStyleSheet(StandardTheme.get_button_style('primary', 'small'))
+        except:
+            pass
+        buttons_layout.addWidget(export_log_button)
+        
+        header_layout.addLayout(buttons_layout)
+        
+        log_layout.addLayout(header_layout)
+        
+        # Create enhanced log table
+        self.enhanced_log_table = QTableWidget(0, 3, self.log_tab)
+        self.enhanced_log_table.setHorizontalHeaderLabels(["Timestamp", "Action/Task", "Details"])
+        self.enhanced_log_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.enhanced_log_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.enhanced_log_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.enhanced_log_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.enhanced_log_table.setAlternatingRowColors(True)
+        self.enhanced_log_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.enhanced_log_table.setSortingEnabled(True)  # Enable sorting
+        
+        try:
+            # Apply standardized styling if available
+            self.enhanced_log_table.setStyleSheet(StandardTheme.get_table_style())
+        except:
+            # Fallback styling
+            self.enhanced_log_table.setStyleSheet("""
+                QTableWidget {
+                    border: 1px solid #E0E0E0;
+                    gridline-color: #E0E0E0;
+                    background-color: white;
+                    alternate-background-color: #F5F5F5;
+                }
+                QHeaderView::section {
+                    background-color: #4361EE;
+                    color: white;
+                    font-weight: bold;
+                    padding: 6px;
+                    border: none;
+                }
+            """)
+        
+        log_layout.addWidget(self.enhanced_log_table, 1)  # Give stretch priority
+        
+        # Create status bar for log tab
+        status_layout = QHBoxLayout()
+        self.log_status_label = QLabel("Ready", self.log_tab)
+        self.log_status_label.setStyleSheet("color: #757575;")
+        status_layout.addWidget(self.log_status_label)
+        status_layout.addStretch()
+        
+        # Add entry count
+        self.log_count_label = QLabel("0 entries", self.log_tab)
+        self.log_count_label.setStyleSheet("color: #757575;")
+        status_layout.addWidget(self.log_count_label)
+        
+        log_layout.addLayout(status_layout)
+        
+        # Add the tab to the tab widget
+        self.tab_widget.addTab(self.log_tab, "Activity Log")
+        
+        # Initially hide the tab - it will be shown when needed
+        self.log_tab_index = self.tab_widget.count() - 1
+        # No need to hide if we're showing it when the button is clicked
+        # self.tab_widget.setTabVisible(self.log_tab_index, False)
+
+    def show_activity_log(self):
+        """Show the activity log tab and update its content."""
+        # Make sure the tab exists
+        if not hasattr(self, 'log_tab'):
+            self.setup_log_tab()
+            self.log_tab_index = self.tab_widget.indexOf(self.log_tab)
+        
+        # Switch to the log tab
+        self.tab_widget.setCurrentIndex(self.log_tab_index)
+        
+        # Refresh the logs
+        self.refresh_logs()
+
+    def refresh_logs(self):
+        """Refresh the log display with the latest entries."""
+        # Update status
+        self.log_status_label.setText("Refreshing logs...")
+        QApplication.processEvents()
+        
+        try:
+            # Read from the application log file if it exists
+            file_logs = []
+            try:
+                with open('logs/application.log', 'r') as f:
+                    file_logs = f.readlines()
+            except:
+                # If file reading fails, use memory logs
+                pass
+                
+            # Get in-memory logs from the log table if it exists
+            memory_logs = []
+            if hasattr(self, 'log_table'):
+                for row in range(self.log_table.rowCount()):
+                    timestamp = self.log_table.item(row, 0).text()
+                    message = self.log_table.item(row, 1).text()
+                    memory_logs.append((timestamp, message, ""))
+            
+            # Clear the enhanced log table
+            self.enhanced_log_table.setRowCount(0)
+            
+            # Process file logs
+            parsed_logs = []
+            for log_line in file_logs:
+                # Try to parse log line with regex
+                import re
+                # Look for timestamp and message patterns
+                match = re.search(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})[^\]]*\] - ([^-]+) - ([^-]+) - (.*)', log_line)
+                if match:
+                    timestamp = match.group(1)
+                    level = match.group(2)
+                    module = match.group(3)
+                    message = match.group(4)
+                    
+                    # Only add INFO, WARNING, and ERROR logs
+                    if level in ["INFO", "WARNING", "ERROR"]:
+                        details = f"Module: {module}, Level: {level}"
+                        parsed_logs.append((timestamp, message, details))
+            
+            # Add both memory and parsed logs
+            all_logs = parsed_logs + memory_logs
+            
+            # Sort logs by timestamp (newest first)
+            all_logs.sort(reverse=True)
+            
+            # Add logs to table
+            for timestamp, message, details in all_logs:
+                row = self.enhanced_log_table.rowCount()
+                self.enhanced_log_table.insertRow(row)
+                
+                # Add timestamp
+                timestamp_item = QTableWidgetItem(timestamp)
+                self.enhanced_log_table.setItem(row, 0, timestamp_item)
+                
+                # Add message
+                message_item = QTableWidgetItem(message)
+                self.enhanced_log_table.setItem(row, 1, message_item)
+                
+                # Add details
+                details_item = QTableWidgetItem(details)
+                self.enhanced_log_table.setItem(row, 2, details_item)
+                
+                # Apply color based on message content (optional)
+                if "error" in message.lower() or "failed" in message.lower():
+                    for col in range(3):
+                        item = self.enhanced_log_table.item(row, col)
+                        if item:
+                            item.setBackground(QColor("#FFEBEE"))  # Light red
+                elif "warning" in message.lower():
+                    for col in range(3):
+                        item = self.enhanced_log_table.item(row, col)
+                        if item:
+                            item.setBackground(QColor("#FFF8E1"))  # Light amber
+                elif "success" in message.lower() or "authenticated" in message.lower():
+                    for col in range(3):
+                        item = self.enhanced_log_table.item(row, col)
+                        if item:
+                            item.setBackground(QColor("#E8F5E9"))  # Light green
+            
+            # Update status
+            self.log_count_label.setText(f"{self.enhanced_log_table.rowCount()} entries")
+            self.log_status_label.setText("Logs refreshed successfully")
+            
+            # Apply any active filters
+            self.filter_logs()
+            
+        except Exception as e:
+            self.log_status_label.setText(f"Error refreshing logs: {str(e)}")
+            # Log the error
+            self.logger.error(f"Error refreshing activity log display: {str(e)}")
+
+    def filter_logs(self):
+        """Filter logs based on search text and date filter."""
+        search_text = self.log_search.text().lower()
+        date_filter = self.log_date_filter.currentText()
+        
+        # Get current date for filtering
+        current_datetime = QDateTime.currentDateTime()
+        today = current_datetime.toString("yyyy-MM-dd")
+        yesterday = current_datetime.addDays(-1).toString("yyyy-MM-dd")
+        week_ago = current_datetime.addDays(-7).toString("yyyy-MM-dd")
+        
+        # Update status
+        self.log_status_label.setText("Filtering logs...")
+        QApplication.processEvents()
+        
+        # Count visible rows
+        visible_count = 0
+        
+        # Check each row
+        for row in range(self.enhanced_log_table.rowCount()):
+            show_row = True
+            
+            # Get timestamp and message
+            timestamp_item = self.enhanced_log_table.item(row, 0)
+            message_item = self.enhanced_log_table.item(row, 1)
+            details_item = self.enhanced_log_table.item(row, 2)
+            
+            if timestamp_item and message_item:
+                timestamp = timestamp_item.text()
+                message = message_item.text()
+                details = details_item.text() if details_item else ""
+                
+                # Apply search filter
+                if search_text and search_text not in message.lower() and search_text not in timestamp.lower() and search_text not in details.lower():
+                    show_row = False
+                
+                # Apply date filter
+                if date_filter != "All Dates":
+                    # Extract date part for comparison
+                    log_date = timestamp.split()[0] if " " in timestamp else timestamp
+                    
+                    if date_filter == "Today" and today != log_date:
+                        show_row = False
+                    elif date_filter == "Yesterday" and yesterday != log_date:
+                        show_row = False
+                    elif date_filter == "Last 7 Days":
+                        # Check if date is older than a week
+                        if log_date < week_ago:
+                            show_row = False
+            
+            # Show or hide row
+            self.enhanced_log_table.setRowHidden(row, not show_row)
+            
+            # Count visible rows
+            if show_row:
+                visible_count += 1
+        
+        # Update status
+        if search_text or date_filter != "All Dates":
+            self.log_count_label.setText(f"{visible_count} of {self.enhanced_log_table.rowCount()} entries")
+            filter_info = []
+            if search_text:
+                filter_info.append(f"Search: \"{search_text}\"")
+            if date_filter != "All Dates":
+                filter_info.append(f"Date: {date_filter}")
+            self.log_status_label.setText(f"Filtered by: {', '.join(filter_info)}")
+        else:
+            self.log_count_label.setText(f"{self.enhanced_log_table.rowCount()} entries")
+            self.log_status_label.setText("Ready")
+
+    def export_logs(self):
+        """Export logs to a CSV or text file."""
+        from PyQt5.QtWidgets import QFileDialog
+        
+        # Ask for file location
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Activity Log",
+            "guard_activity_log.csv",
+            "CSV Files (*.csv);;Text Files (*.txt);;All Files (*)"
+        )
+        
+        if not file_path:
+            return  # User cancelled
+        
+        try:
+            # Determine format based on extension
+            is_csv = file_path.lower().endswith('.csv')
+            
+            with open(file_path, 'w') as f:
+                # Write header
+                if is_csv:
+                    f.write("Timestamp,Action,Details\n")
+                else:
+                    f.write("Timestamp | Action | Details\n")
+                    f.write("-" * 80 + "\n")
+                
+                # Write visible rows only
+                for row in range(self.enhanced_log_table.rowCount()):
+                    if not self.enhanced_log_table.isRowHidden(row):
+                        timestamp = self.enhanced_log_table.item(row, 0).text()
+                        message = self.enhanced_log_table.item(row, 1).text()
+                        details = self.enhanced_log_table.item(row, 2).text()
+                        
+                        # Escape commas and quotes for CSV
+                        if is_csv:
+                            timestamp = f'"{timestamp}"'
+                            # Escape quotes in message and details
+                            message = f'"{message.replace('"', '""')}"'
+                            details = f'"{details.replace('"', '""')}"'
+                            f.write(f"{timestamp},{message},{details}\n")
+                        else:
+                            f.write(f"{timestamp} | {message} | {details}\n")
+            
+            # Show success message
+            self.log_status_label.setText(f"Log exported successfully to {file_path}")
+            QMessageBox.information(
+                self,
+                "Export Successful",
+                f"Activity log exported successfully to:\n{file_path}"
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Export Error",
+                f"Error exporting log: {str(e)}"
+            )
+            self.log_status_label.setText(f"Export failed: {str(e)}")
+    def setup_data_management_tab(self):
+        """Set up the PII data management tab without the log table."""
+        # Create tab widget and layout
+        self.data_tab = QWidget()
+        data_layout = QVBoxLayout(self.data_tab)
+        data_layout.setContentsMargins(10, 15, 10, 10)
+        data_layout.setSpacing(15)
+        
+        # Split view - Categories on left, Details on right
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        
+        # Left panel - Categories
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        
+        
+        # Categories table
+        self.category_table = QTableWidget(0, 1, left_panel)
+        self.category_table.setHorizontalHeaderLabels(["Category"])
+        self.category_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.category_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.category_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.category_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.category_table.setAlternatingRowColors(True)
+        self.category_table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.category_table.customContextMenuRequested.connect(self.show_category_menu)
+        self.category_table.itemSelectionChanged.connect(self.on_category_selected)
+        self.category_table.setVisible(False)
+        self.category_table.setStyleSheet(StandardTheme.get_table_style())
+        left_layout.addWidget(self.category_table, 1)  # Give stretch priority
+        
+        # Left panel buttons
+        left_buttons = QHBoxLayout()
+        
+        self.btn_refresh_categories = QPushButton("Refresh", left_panel)
+        self.btn_refresh_categories.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
+        self.btn_refresh_categories.setStyleSheet(StandardTheme.get_button_style('secondary', 'small'))
+        self.btn_refresh_categories.setCursor(Qt.PointingHandCursor)
+        self.btn_refresh_categories.clicked.connect(self.refresh_categories)
+        self.btn_refresh_categories.setVisible(False)
+        left_buttons.addWidget(self.btn_refresh_categories)
+        
+        left_buttons.addStretch()
+        left_layout.addLayout(left_buttons)
+        
+        # Right panel - Data view
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Placeholder when no category is selected
+        self.data_placeholder = QLabel("Select a category to view data items", right_panel)
+        self.data_placeholder.setAlignment(Qt.AlignCenter)
+        self.data_placeholder.setStyleSheet("""
+            font-family: 'Segoe UI', Arial, sans-serif;
+            font-size: 14px;
+            color: #9E9E9E;
+            padding: 40px;
+            background-color: #F5F5F5;
+            border: 1px dashed #BDBDBD;
+            border-radius: 8px;
+        """)
+        self.data_placeholder.setVisible(False)
+        right_layout.addWidget(self.data_placeholder)
+        
+        # Right panel action buttons
+        right_buttons = QHBoxLayout()
+        
+        self.btn_display_data = QPushButton("Display All Data", right_panel)
+        self.btn_display_data.setIcon(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
+        self.btn_display_data.setStyleSheet(StandardTheme.get_button_style('primary', 'medium'))
+        self.btn_display_data.setCursor(Qt.PointingHandCursor)
+        self.btn_display_data.clicked.connect(self.show_data_window)
+        self.btn_display_data.setVisible(False)
+        right_buttons.addWidget(self.btn_display_data)
+        
+        self.btn_add_entry = QPushButton("Add New Entry", right_panel)
+        self.btn_add_entry.setIcon(self.style().standardIcon(QStyle.SP_FileDialogNewFolder))
+        self.btn_add_entry.setStyleSheet(StandardTheme.get_button_style('success', 'medium'))
+        self.btn_add_entry.setCursor(Qt.PointingHandCursor)
+        self.btn_add_entry.clicked.connect(self.add_new_entry)
+        self.btn_add_entry.setVisible(False)
+        right_buttons.addWidget(self.btn_add_entry)
+        
+        right_buttons.addStretch()
+        right_layout.addLayout(right_buttons)
+        
+        # Add panels to splitter
+        splitter.addWidget(left_panel)
+        splitter.addWidget(right_panel)
+        splitter.setStretchFactor(0, 1)  # Left panel gets 1/3
+        splitter.setStretchFactor(1, 2)  # Right panel gets 2/3
+        data_layout.addWidget(splitter, 1)  # Give stretch priority
+        
+        # Create a hidden log table to store logs (won't be displayed)
+        # This is maintained for compatibility with existing code
+        self.log_table = QTableWidget(0, 2)
+        self.log_table.setHorizontalHeaderLabels(["Timestamp", "Action/Task Performed"])
+        self.log_table.setVisible(False)  # Never shown in the UI
+        
+        # Add tab to tab widget
+        self.tab_widget.addTab(self.data_tab, "Data Management")
+
+    def show_authenticated_ui(self):
+        """Update UI to show authenticated state."""
+        # Hide connect button
+        self.btn_connect_server.setVisible(False)
+        
+        # Update auth button container with logout button
+        logout_button = QPushButton("Logout", self)
+        logout_button.setIcon(self.style().standardIcon(QStyle.SP_DialogCloseButton))
+        try:
+            logout_button.setStyleSheet(StandardTheme.get_button_style('outline'))
+        except:
+            pass
+        logout_button.setCursor(Qt.PointingHandCursor)
+        logout_button.clicked.connect(self.logout_user)
+        self.auth_button_container.layout().addWidget(logout_button)
+        
+        # Show welcome message
+        user_id = self.session_manager.user_id or "User"
+        self.welcome_text.setText(f"Welcome, {user_id}")
+        self.welcome_text.setVisible(True)
+        
+        # Show data components
+        self.category_table.setVisible(True)
+        self.btn_display_data.setVisible(True)
+        self.btn_add_entry.setVisible(True)
+        self.btn_refresh_categories.setVisible(True)
+        self.data_placeholder.setVisible(True)
+        
+        # Show the activity log button
+        self.log_button.setVisible(True)
+        
+        # Initialize the log tab if it doesn't exist
+        if not hasattr(self, 'log_tab'):
+            self.setup_log_tab()
     def update_log(self, timestamp, message):
         """
-        Update the log table with a new entry.
+        Update the log table with a new entry and enhanced details.
         
         Args:
             timestamp (str): Timestamp for the log entry
@@ -1743,6 +2261,18 @@ class GuardMainWindow(QMainWindow):
         """
         # Log to file
         self.logger.info(f"{timestamp} - {message}")
+        
+        # Extract details if available (for enhanced logging)
+        details = ""
+        
+        # Parse out details if the message has a specific format
+        if ":" in message:
+            parts = message.split(":", 1)
+            if len(parts) == 2:
+                action_type = parts[0].strip()
+                details = parts[1].strip()
+                
+                # Don't modify the message as we need it for the original log table
         
         # Update UI if log table exists and is visible
         if hasattr(self, 'log_table') and self.log_table.isVisible():
@@ -1762,21 +2292,40 @@ class GuardMainWindow(QMainWindow):
             max_rows = 100
             if self.log_table.rowCount() > max_rows:
                 self.log_table.removeRow(0)  # Remove oldest entry
-
-    def handle_session_expired(self):
-        """Handle session expiration."""
-        timestamp = QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
-        self.update_log(timestamp, "Session expired")
         
-        QMessageBox.warning(
-            self,
-            "Session Expired",
-            "Your session has expired. Please log in again."
-        )
-        
-        # Force logout
-        self.logout_user()
-
+        # Update the enhanced log table if it exists
+        if hasattr(self, 'enhanced_log_table'):
+            row_position = self.enhanced_log_table.rowCount()
+            self.enhanced_log_table.insertRow(row_position)
+            
+            timestamp_item = QTableWidgetItem(timestamp)
+            message_item = QTableWidgetItem(message)
+            details_item = QTableWidgetItem(details)
+            
+            self.enhanced_log_table.setItem(row_position, 0, timestamp_item)
+            self.enhanced_log_table.setItem(row_position, 1, message_item)
+            self.enhanced_log_table.setItem(row_position, 2, details_item)
+            
+            # Apply color based on message content (optional)
+            if "error" in message.lower() or "failed" in message.lower():
+                for col in range(3):
+                    item = self.enhanced_log_table.item(row_position, col)
+                    if item:
+                        item.setBackground(QColor("#FFEBEE"))  # Light red
+            elif "warning" in message.lower():
+                for col in range(3):
+                    item = self.enhanced_log_table.item(row_position, col)
+                    if item:
+                        item.setBackground(QColor("#FFF8E1"))  # Light amber
+            elif "success" in message.lower() or "authenticated" in message.lower():
+                for col in range(3):
+                    item = self.enhanced_log_table.item(row_position, col)
+                    if item:
+                        item.setBackground(QColor("#E8F5E9"))  # Light green
+            
+            # Update log counts
+            if hasattr(self, 'log_count_label'):
+                self.log_count_label.setText(f"{self.enhanced_log_table.rowCount()} entries")
     def handle_token_refreshed(self):
         """Handle token refresh event."""
         if not hasattr(self, 'session_manager'):
