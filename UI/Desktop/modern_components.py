@@ -849,6 +849,50 @@ class ModernDataDialog(QDialog):
 
         # Apply filters which will display the items
         self.apply_filters()
+    
+    def apply_filters(self):
+        """
+        Apply the selected filters to the data items.
+        
+        This method filters the data based on category and type selections
+        and then displays the filtered items.
+        """
+        # Get the current filter values
+        category = self.category_filter.currentText()
+        type_ = self.type_filter.currentText()
+        
+        # Log filtering operation
+        if hasattr(self, 'logger'):
+            self.logger.info(f"Applying filters: Category={category}, Type={type_}")
+        
+        # Apply filters based on selection
+        if category == "All Categories" and type_ == "All Types":
+            # No filtering needed
+            self.filtered_items = self.data_items
+        else:
+            # Apply filters
+            self.filtered_items = []
+            for item in self.data_items:
+                item_category = item.get('Category', 'Uncategorized')
+                item_type = item.get('Type', 'Unknown')
+                
+                # Check category filter
+                if category != "All Categories" and item_category != category:
+                    continue
+                    
+                # Check type filter
+                if type_ != "All Types" and item_type != type_:
+                    continue
+                    
+                # Item passed all filters
+                self.filtered_items.append(item)
+        
+        # Update the empty message visibility
+        if hasattr(self, 'empty_message'):
+            self.empty_message.setVisible(not self.filtered_items)
+        
+        # Display the filtered items
+        self.display_items()
 
     def display_items(self):
         """Display the filtered items in the UI."""

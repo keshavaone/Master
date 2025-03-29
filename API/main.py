@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 from api.auth import auth_router, init_auth_system
 from api.controllers.pii_controller import router as pii_router
 from api.controllers.system_controller import router as system_router
-from api.encryption import get_kms_handler, get_secret_manager
+from api.encryption import get_kms_handler
 
 # Configure logging
 handler = RotatingFileHandler(

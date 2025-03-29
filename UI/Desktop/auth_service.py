@@ -1,16 +1,14 @@
-# UI/Desktop/auth_service.py
 """
-Streamlined Authentication Service for GUARD application.
+Consolidated Authentication Service for GUARD application.
 
-This module provides a standardized approach to authentication using AWS SSO
-with proper credential handling and session management.
+This module provides a simplified approach to authentication by consolidating
+credentials management, session handling, and API authentication into a single service.
 """
 
-import os
 import time
 import logging
 import requests
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple
 from datetime import datetime
 
 import api.CONSTANTS as CONSTANTS
@@ -37,13 +35,22 @@ class AuthenticationService:
         self.auth_type = None
         self.session_manager = None
         
-        # Set up logging
+        # Configure logging
         self.logger = logging.getLogger('AuthService')
         self.logger.setLevel(logging.INFO)
+        
+        # Set up handler if not already configured
+        if not self.logger.handlers:
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
+        
+        self.logger.info("Authentication service initialized")
     
     def is_authenticated(self) -> bool:
         """
-        Check if a user is currently authenticated.
+        Check if a user is currently authenticated with valid token.
         
         Returns:
             bool: True if authenticated and token is valid
@@ -106,22 +113,39 @@ class AuthenticationService:
                 headers["X-AWS-Session-Token"] = session_token
             
             # Authenticate with the API
-            self.logger.info("Authenticating with AWS SSO credentials")
-            response = requests.post(
-                f"{self.api_base_url}/auth/aws-sso",
-                headers=headers
-            )
+            self.logger.info(f"Authenticating with AWS SSO credentials to {self.api_base_url}")
+            try:
+                response = requests.post(
+                    f"{self.api_base_url}/auth/aws-sso",
+                    headers=headers,
+                    timeout=30  # Add a reasonable timeout
+                )
+            except requests.RequestException as e:
+                error_msg = f"API connection error: {str(e)}"
+                self.logger.error(error_msg)
+                return False, error_msg
             
             if response.status_code != 200:
-                error_msg = f"AWS SSO authentication failed: {response.text}"
+                error_msg = f"AWS SSO authentication failed: Status {response.status_code} - {response.text}"
                 self.logger.error(error_msg)
                 return False, error_msg
             
             # Parse the response
-            token_data = response.json()
-            self.token = token_data["access_token"]
+            try:
+                token_data = response.json()
+            except ValueError:
+                error_msg = "Invalid JSON response from server"
+                self.logger.error(error_msg)
+                return False, error_msg
+                
+            self.token = token_data.get("access_token")
+            if not self.token:
+                error_msg = "No token returned from server"
+                self.logger.error(error_msg)
+                return False, error_msg
+                
             self.token_type = token_data.get("token_type", "bearer")
-            self.user_id = token_data["user_id"]
+            self.user_id = token_data.get("user_id")
             self.auth_type = "aws_sso"
             
             # Calculate token expiration
@@ -131,10 +155,6 @@ class AuthenticationService:
             self.logger.info(f"Authenticated user {self.user_id} with AWS SSO")
             return True, "Authentication successful"
             
-        except requests.RequestException as e:
-            error_msg = f"API connection error: {str(e)}"
-            self.logger.error(error_msg)
-            return False, error_msg
         except Exception as e:
             error_msg = f"AWS SSO authentication error: {str(e)}"
             self.logger.error(error_msg)
@@ -148,6 +168,7 @@ class AuthenticationService:
             session_manager: Session manager with AWS SSO tokens
         """
         self.session_manager = session_manager
+        self.logger.info("Session manager set")
     
     def refresh_token(self) -> bool:
         """
@@ -162,11 +183,12 @@ class AuthenticationService:
         
         try:
             # For AWS SSO, we need to re-authenticate using session manager
-            if self.session_manager and self.session_manager.is_authenticated:
+            if self.auth_type == "aws_sso" and self.session_manager and self.session_manager.is_authenticated:
+                self.logger.info("Refreshing AWS SSO token")
                 success, _ = self.authenticate_with_aws_sso()
                 return success
             else:
-                self.logger.error("No active AWS SSO session for token refresh")
+                self.logger.error("Cannot refresh token: No active AWS SSO session or unsupported auth type")
                 return False
                 
         except Exception as e:
@@ -190,11 +212,12 @@ class AuthenticationService:
                 headers = self.get_auth_headers()
                 response = requests.post(
                     f"{self.api_base_url}/auth/logout",
-                    headers=headers
+                    headers=headers,
+                    timeout=10  # Add a reasonable timeout
                 )
                 
                 if response.status_code != 200:
-                    self.logger.warning(f"API logout request failed: {response.text}")
+                    self.logger.warning(f"API logout request failed: {response.status_code} - {response.text}")
                     # Continue with local logout
             except Exception as e:
                 self.logger.warning(f"Error during API logout: {str(e)}")
@@ -265,13 +288,17 @@ class AuthenticationService:
             url = f"{self.api_base_url}/{endpoint.lstrip('/')}"
             headers = self.get_auth_headers()
             
+            # Log request (without sensitive data)
+            self.logger.info(f"Making {method.upper()} request to {url}")
+            
             # Make the request
             response = requests.request(
                 method=method.upper(),
                 url=url,
                 json=data,
                 params=params,
-                headers=headers
+                headers=headers,
+                timeout=30  # Add a reasonable timeout
             )
             
             # Handle 401 Unauthorized by refreshing token and retrying once
@@ -285,7 +312,8 @@ class AuthenticationService:
                         url=url,
                         json=data,
                         params=params,
-                        headers=headers
+                        headers=headers,
+                        timeout=30  # Add a reasonable timeout
                     )
                 else:
                     self.logger.error("Token refresh failed")

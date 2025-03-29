@@ -9,13 +9,10 @@ This module provides encryption and secret management functionality for the API.
 import os,ast
 from api.encryption.kms_handler import KMSHandler
 from api.encryption.store_secrets import get_secret
-from api.encryption.secret_manager import SecretManager
 
 __all__ = [
-    "KMSHandler",
-    "SecretManager",
-    "get_kms_handler",
-    "get_secret_manager"
+    "KMSHandler"
+    "get_kms_handler"
 ]
 
 # Global instances for singleton pattern
@@ -43,18 +40,3 @@ def get_kms_handler() -> KMSHandler:
             _kms_handler.initialize_from_secret(secret_name)
         
     return _kms_handler
-
-def get_secret_manager() -> SecretManager:
-    """
-    Get the secret manager instance.
-    
-    Returns:
-        SecretManager: The secret manager instance
-    """
-    global _secret_manager
-    
-    if _secret_manager is None:
-        # Create a new secret manager
-        _secret_manager = SecretManager(region_name=os.environ.get('AWS_REGION', 'us-east-1'))
-        
-    return _secret_manager

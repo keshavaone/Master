@@ -1,6 +1,5 @@
-# UI/Desktop/main.py (Modified)
 """
-Enhanced Desktop application for secure PII data management with authentication.
+Stabilized Desktop application for secure PII data management with authentication.
 
 This module provides a streamlined graphical user interface for managing PII
 (Personally Identifiable Information) data with proper authentication, encryption,
@@ -10,9 +9,6 @@ and secure storage capabilities.
 # Standard library imports
 import sys
 import os
-import time
-import ast
-import json
 import logging
 from logging.handlers import RotatingFileHandler
 
@@ -21,9 +17,9 @@ import pandas as pd
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QPushButton, QLabel, QTableWidget, QHeaderView, QTableWidgetItem,
-    QLineEdit, QMessageBox, QInputDialog, QDialog, QScrollArea, 
+    QLineEdit, QMessageBox, QInputDialog, QDialog, 
     QMenu, QTabWidget, QStatusBar,
-    QProgressDialog, QSizePolicy, QFrame
+    QProgressDialog, QFrame
 )
 from PyQt5.QtGui import QCursor
 from PyQt5.QtCore import Qt, QTimer, QDateTime
@@ -34,7 +30,7 @@ from UI.Desktop.session_manager import SessionManager
 from UI.Desktop.auth_service import AuthenticationService
 from UI.Desktop.api_client import APIClient
 from UI.Desktop.modern_components import (
-    ModernButton, SessionStatusWidget, ModernDataDialog, CRUDHelper
+    ModernButton, ModernDataDialog, SessionStatusWidget, CRUDHelper
 )
 
 # Setup logging with rotation
@@ -59,8 +55,6 @@ class PIIWindow(QMainWindow):
         
         # Initialize variables
         self.modified = False
-        self.agent = None
-        self.assistant = None
         self.auth_service = None
         self.api_client = None
         
@@ -98,14 +92,6 @@ class PIIWindow(QMainWindow):
         
         # Create PII Data tab
         self.setup_pii_tab()
-        
-        # Set up YouTube downloader tab
-        from UI.Desktop.youtube_integration import setup_youtube_downloader
-        self.youtube_downloader = setup_youtube_downloader(
-            self, 
-            self.tab_widget, 
-            self.update_log
-        )
         
         # Log initialization
         timestamp = QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
@@ -424,34 +410,6 @@ class PIIWindow(QMainWindow):
             self.btn_connect_server.setText('Connect to Server')
             self.btn_connect_server.setDisabled(False)
 
-    def authenticate_direct(self):
-        """Direct login method for development/testing."""
-        username, ok_pressed = QInputDialog.getText(
-            self, "Direct Login", "Username:", QLineEdit.Normal, "admin"
-        )
-        if ok_pressed and username:
-            password, ok_pressed = QInputDialog.getText(
-                self, "Direct Login", "Password:", QLineEdit.Password
-            )
-            if ok_pressed and password:
-                success, message = self.auth_service.authenticate_with_password(username, password)
-                if success:
-                    # Setup API client
-                    self.setup_api_client()
-                    
-                    # Complete connection process
-                    self.connect_after_authentication()
-                else:
-                    QMessageBox.warning(self, "Authentication Error", message)
-                    self.btn_connect_server.setText('Connect to Server')
-                    self.btn_connect_server.setDisabled(False)
-            else:
-                self.btn_connect_server.setText('Connect to Server')
-                self.btn_connect_server.setDisabled(False)
-        else:
-            self.btn_connect_server.setText('Connect to Server')
-            self.btn_connect_server.setDisabled(False)
-
     def setup_api_client(self):
         """Set up the API client."""
         self.api_client = APIClient(
@@ -578,7 +536,7 @@ class PIIWindow(QMainWindow):
             self.data_table.setItem(row, 0, QTableWidgetItem(item))
 
     def show_data_window(self):
-        """Show data in a dialog window."""
+        """Show data in a modern dialog window."""
         if not hasattr(self, 'auth_service') or not self.auth_service.is_authenticated():
             QMessageBox.warning(self, "Error", "Not connected to server.")
             return
@@ -594,8 +552,7 @@ class PIIWindow(QMainWindow):
             # Set the CRUD helper and services
             data_dialog.set_crud_helper(
                 CRUDHelper,
-                auth_service=self.auth_service,
-                agent=self.agent if hasattr(self, 'agent') else None
+                auth_service=self.auth_service
             )
             
             # Get data
@@ -662,155 +619,29 @@ class PIIWindow(QMainWindow):
             logger.error(f"Error refreshing data: {str(e)}")
 
     def add_new_entry(self):
-        """Show dialog to add a new entry."""
+        """Show dialog to add a new entry using the modern dialog."""
         if not hasattr(self, 'auth_service') or not self.auth_service.is_authenticated():
             QMessageBox.warning(self, "Error", "Not connected to server.")
             return
         
         try:
-            # Create empty item template
-            new_item = {
-                "Category": "",
-                "Type": "",
-                "PII": str([{"Item Name": "", "Data": ""}])
-            }
+            # Log the operation
+            timestamp = QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
+            self.update_log(timestamp, "Opening add new entry dialog")
             
-            # Show dialog to get new entry details
-            dialog = QDialog(self)
-            dialog.setWindowTitle("Add New Entry")
-            main_layout = QVBoxLayout(dialog)
+            # Create and show the modern data dialog in "add" mode
+            data_dialog = ModernDataDialog(self, "Add New Entry", self.fetch_latest_data)
             
-            # Category input
-            category_label = QLabel("Category:", dialog)
-            category_input = QLineEdit(dialog)
-            main_layout.addWidget(category_label)
-            main_layout.addWidget(category_input)
+            # Set the CRUD helper and services
+            data_dialog.set_crud_helper(
+                CRUDHelper,
+                auth_service=self.auth_service
+            )
             
-            # Type input
-            type_label = QLabel("Type:", dialog)
-            type_input = QLineEdit(dialog)
-            main_layout.addWidget(type_label)
-            main_layout.addWidget(type_input)
-            
-            # PII data section
-            pii_label = QLabel("Your GUARD:", dialog)
-            main_layout.addWidget(pii_label)
-            
-            pii_layout = QVBoxLayout()
-            pii_items = []
-            
-            def add_pii_item(default_name='', default_data=''):
-                """Add a new PII item to the dialog."""
-                item_layout = QHBoxLayout()
+            # Show the add dialog
+            data_dialog.show_add_item_dialog()
+            data_dialog.exec_()
                 
-                item_name_input = QLineEdit(dialog)
-                if default_name:
-                    item_name_input.setText(default_name)
-                item_data_input = QLineEdit(dialog)
-                if default_data:
-                    item_data_input.setText(default_data)
-                
-                item_layout.addWidget(QLabel("Item Name:", dialog))
-                item_layout.addWidget(item_name_input)
-                item_layout.addWidget(QLabel("Data:", dialog))
-                item_layout.addWidget(item_data_input)
-                
-                remove_button = QPushButton("-", dialog)
-                remove_button.setFixedSize(35, 25)
-                remove_button.clicked.connect(
-                    lambda: remove_pii_item(item_layout, item_name_input, item_data_input)
-                )
-                item_layout.addWidget(remove_button)
-                
-                pii_layout.addLayout(item_layout)
-                pii_items.append((item_name_input, item_data_input))
-            
-            def remove_pii_item(item_layout, item_name_input, item_data_input):
-                """Remove a PII item from the dialog."""
-                for i in reversed(range(item_layout.count())):
-                    widget = item_layout.itemAt(i).widget()
-                    if widget is not None:
-                        widget.deleteLater()
-                pii_layout.removeItem(item_layout)
-                pii_items.remove((item_name_input, item_data_input))
-            
-            # Add default PII item
-            add_pii_item()
-            
-            # Add button to add more PII items
-            add_button = QPushButton("+", dialog)
-            add_button.setFixedSize(35, 30)
-            add_button.clicked.connect(lambda: add_pii_item())
-            
-            main_layout.addLayout(pii_layout)
-            main_layout.addWidget(add_button, alignment=Qt.AlignRight)
-            
-            # Buttons
-            button_layout = QHBoxLayout()
-            ok_button = QPushButton("OK", dialog)
-            cancel_button = QPushButton("Cancel", dialog)
-            button_layout.addWidget(ok_button)
-            button_layout.addWidget(cancel_button)
-            main_layout.addLayout(button_layout)
-            
-            # Handle button clicks
-            def handle_ok():
-                """Handle OK button click."""
-                category = category_input.text().strip()
-                type_ = type_input.text().strip()
-                
-                # Collect PII data
-                pii_data = []
-                for name_input, data_input in pii_items:
-                    name = name_input.text().strip()
-                    data = data_input.text().strip()
-                    if name or data:  # Include if either is provided
-                        pii_data.append({
-                            "Item Name": name,
-                            "Data": data
-                        })
-                
-                # Validate input
-                if not category:
-                    QMessageBox.warning(dialog, "Validation Error", "Category is required")
-                    return
-                
-                if not type_:
-                    QMessageBox.warning(dialog, "Validation Error", "Type is required")
-                    return
-                
-                if not pii_data:
-                    QMessageBox.warning(dialog, "Validation Error", "At least one PII item is required")
-                    return
-                
-                # Create item data
-                item_data = {
-                    "Category": category,
-                    "Type": type_,
-                    "PII": str(pii_data)
-                }
-                
-                # Send to server
-                success, response = self.api_client.sync_add_pii_item(item_data)
-                
-                if success:
-                    QMessageBox.information(dialog, "Success", "Item added successfully")
-                    dialog.accept()
-                    
-                    # Refresh data
-                    self.fetch_latest_data()
-                    
-                    # Also update the category list in the main UI
-                    self.fetch_initial_data()
-                else:
-                    QMessageBox.warning(dialog, "Error", f"Failed to add item: {response}")
-            
-            ok_button.clicked.connect(handle_ok)
-            cancel_button.clicked.connect(dialog.reject)
-            
-            # Show dialog
-            dialog.exec_()
-            
         except Exception as e:
             logger.error(f"Error adding new entry: {str(e)}")
             QMessageBox.critical(
@@ -856,29 +687,15 @@ class PIIWindow(QMainWindow):
                 QMessageBox.information(self, "No Items", f"No items found for category: {selected_item_text}")
                 return
             
-            # Get the types from this category
-            types = list(set(item.get('Type', 'Unknown') for item in filtered_items))
-            
-            # Show dialog to select type
-            selected_type, ok_pressed = QInputDialog.getItem(
-                self,
-                f"Items in {selected_item_text}",
-                "Select an item type:",
-                types,
-                0,
-                False
+            # Show data using the modern data dialog
+            data_dialog = ModernDataDialog(self, f"Items in {selected_item_text}", self.fetch_latest_data)
+            data_dialog.set_crud_helper(
+                CRUDHelper,
+                auth_service=self.auth_service
             )
+            data_dialog.set_data(filtered_items)
+            data_dialog.exec_()
             
-            if ok_pressed and selected_type:
-                # Filter by selected type
-                type_items = [item for item in filtered_items if item.get('Type') == selected_type]
-                
-                if type_items:
-                    # Show the items
-                    self.show_pii_items_dialog(selected_type, type_items)
-                else:
-                    QMessageBox.information(self, "No Items", f"No items found for type: {selected_type}")
-        
         except Exception as e:
             logger.error(f"Error processing selection: {str(e)}")
             QMessageBox.warning(
@@ -886,138 +703,6 @@ class PIIWindow(QMainWindow):
                 "Selection Error",
                 f"Error processing selection: {str(e)}"
             )
-
-    def show_pii_items_dialog(self, title, items):
-        """
-        Show a dialog with PII items.
-        
-        Args:
-            title (str): Dialog title
-            items (list): PII items to display
-        """
-        timestamp = QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
-        self.update_log(timestamp, f"Displaying items for: {title}")
-        
-        # Create dialog
-        dialog = QDialog(self)
-        dialog.setWindowTitle(title)
-        dialog.setMinimumSize(600, 400)
-        
-        # Create layout
-        layout = QVBoxLayout(dialog)
-        
-        # Create scroll area
-        scroll_area = QScrollArea(dialog)
-        scroll_area.setWidgetResizable(True)
-        
-        # Create content widget
-        content_widget = QWidget()
-        content_layout = QVBoxLayout(content_widget)
-        
-        # Add items
-        for item in items:
-            # Extract PII data
-            pii_data = item.get('PII', '[]')
-            
-            try:
-                # Parse PII data
-                if isinstance(pii_data, str):
-                    pii_items = ast.literal_eval(pii_data)
-                else:
-                    pii_items = pii_data
-                
-                # Create frame for this item
-                item_frame = QFrame(content_widget)
-                item_frame.setFrameShape(QFrame.StyledPanel)
-                item_frame.setFrameShadow(QFrame.Raised)
-                item_frame.setStyleSheet(
-                    "border: 1px solid #cccccc; "
-                    "border-radius: 5px; "
-                    "background-color: #f9f9f9; "
-                    "margin: 5px;"
-                )
-                
-                # Create layout for the frame
-                item_layout = QVBoxLayout(item_frame)
-                
-                # Add header
-                header_label = QLabel(f"Type: {item.get('Type', 'Unknown')}")
-                header_label.setStyleSheet("font-weight: bold; font-size: 14px;")
-                item_layout.addWidget(header_label)
-                
-                # Add PII items
-                if isinstance(pii_items, list):
-                    for pii_item in pii_items:
-                        if isinstance(pii_item, dict):
-                            # Create a row for each PII item
-                            pii_layout = QHBoxLayout()
-                            
-                            # Item name
-                            name = pii_item.get('Item Name', 'Unknown')
-                            name_label = QLabel(f"{name}:")
-                            name_label.setStyleSheet("font-weight: bold;")
-                            name_label.setMinimumWidth(100)
-                            pii_layout.addWidget(name_label)
-                            
-                            # Item data
-                            data = str(pii_item.get('Data', ''))
-                            data_label = QLabel(data)
-                            data_label.setWordWrap(True)
-                            data_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-                            pii_layout.addWidget(data_label)
-                            
-                            # Copy button
-                            copy_btn = QPushButton("Copy", item_frame)
-                            copy_btn.setStyleSheet("background-color: #f0f0f0;")
-                            copy_btn.clicked.connect(lambda checked, d=data: self.copy_to_clipboard(d))
-                            pii_layout.addWidget(copy_btn)
-                            
-                            item_layout.addLayout(pii_layout)
-                else:
-                    # Handle non-list PII data
-                    pii_layout = QHBoxLayout()
-                    pii_layout.addWidget(QLabel("Data:"))
-                    data_label = QLabel(str(pii_items))
-                    data_label.setWordWrap(True)
-                    pii_layout.addWidget(data_label)
-                    item_layout.addLayout(pii_layout)
-                
-                # Add to content layout
-                content_layout.addWidget(item_frame)
-                
-            except Exception as e:
-                logger.error(f"Error displaying PII item: {str(e)}")
-                error_label = QLabel(f"Error displaying item: {str(e)}")
-                error_label.setStyleSheet("color: red;")
-                content_layout.addWidget(error_label)
-        
-        # Set the content widget as the scroll area's widget
-        scroll_area.setWidget(content_widget)
-        layout.addWidget(scroll_area)
-        
-        # Add close button
-        close_btn = QPushButton("Close", dialog)
-        close_btn.clicked.connect(dialog.accept)
-        layout.addWidget(close_btn, alignment=Qt.AlignRight)
-        
-        # Show dialog
-        dialog.exec_()
-
-    def copy_to_clipboard(self, data):
-        """
-        Copy data to clipboard.
-        
-        Args:
-            data (str): Data to copy
-        """
-        clipboard = QApplication.clipboard()
-        clipboard.setText(data)
-        
-        timestamp = QDateTime.currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
-        self.update_log(timestamp, f"Copied data to clipboard")
-        
-        # Optionally show a small confirmation
-        QMessageBox.information(self, "Copied", "Data copied to clipboard", QMessageBox.Ok)
 
     def show_context_menu(self, position):
         """
@@ -1266,4 +951,3 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
     window = PIIWindow()
     sys.exit(app.exec_())
-    
