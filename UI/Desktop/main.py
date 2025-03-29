@@ -907,8 +907,8 @@ class GuardMainWindow(QMainWindow):
         
         # Set up panel layout
         login_layout = QVBoxLayout(login_panel)
-        login_layout.setContentsMargins(20, 20, 20, 20)
-        login_layout.setSpacing(15)
+        login_layout.setContentsMargins(35, 35, 35, 35)
+        login_layout.setSpacing(25)
         
         # Add header
         header_label = QLabel("Authentication", login_panel)

@@ -14,43 +14,43 @@ from PyQt5.QtCore import Qt, QSize
 class StandardTheme:
     """
     GUARD application theme with consistent styling and design patterns.
-    
+
     This class provides standardized colors, font styles, component styles,
     and design patterns to be used across the application for a consistent
     and professional appearance.
     """
-    
+
     # Core brand colors
     PRIMARY = "#1976D2"         # Primary blue
     PRIMARY_LIGHT = "#BBDEFB"
-    PRIMARY_DARK = "#0D47A1" 
-    
+    PRIMARY_DARK = "#0D47A1"
+
     SECONDARY = "#455A64"       # Dark blue-gray
     SECONDARY_LIGHT = "#CFD8DC"
     SECONDARY_DARK = "#263238"
-    
+
     # AWS specific colors (for SSO integration)
     AWS_ORANGE = "#FF9900"
     AWS_LIGHT = "#FFECB3"
     AWS_DARK = "#E65100"
-    
+
     # Status/State colors
     SUCCESS = "#4CAF50"         # Green
     SUCCESS_LIGHT = "#C8E6C9"
     SUCCESS_DARK = "#2E7D32"
-    
+
     WARNING = "#FFC107"         # Amber
     WARNING_LIGHT = "#FFECB3"
     WARNING_DARK = "#FF8F00"
-    
+
     DANGER = "#F44336"          # Red
     DANGER_LIGHT = "#FFCDD2"
     DANGER_DARK = "#B71C1C"
-    
+
     INFO = "#2196F3"            # Light Blue
     INFO_LIGHT = "#B3E5FC"
     INFO_DARK = "#0277BD"
-    
+
     # Gray scale
     GRAY_50 = "#FAFAFA"
     GRAY_100 = "#F5F5F5"
@@ -62,51 +62,51 @@ class StandardTheme:
     GRAY_700 = "#616161"
     GRAY_800 = "#424242"
     GRAY_900 = "#212121"
-    
+
     # Text colors
     TEXT_PRIMARY = "#212121"
     TEXT_SECONDARY = "#757575"
     TEXT_DISABLED = "#9E9E9E"
     TEXT_LIGHT = "#FFFFFF"
-    
+
     # Background colors
     BG_DEFAULT = "#FFFFFF"
     BG_PAPER = "#F5F5F5"
     BG_DARK = "#EEEEEE"
-    
+
     # Font families
     FONT_FAMILY_PRIMARY = "'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
     FONT_FAMILY_MONOSPACE = "'Consolas', 'Courier New', monospace"
-    
+
     # Font sizes
     FONT_SIZE_SMALL = "11px"
     FONT_SIZE_NORMAL = "13px"
     FONT_SIZE_MEDIUM = "15px"
     FONT_SIZE_LARGE = "18px"
     FONT_SIZE_XLARGE = "24px"
-    
+
     # Border radius
     BORDER_RADIUS_SMALL = "4px"
     BORDER_RADIUS_MEDIUM = "6px"
     BORDER_RADIUS_LARGE = "8px"
-    
+
     # Transition duration
     TRANSITION_DURATION = "0.15s"
-    
+
     # Spacing
     SPACING_UNIT = 8
-    
+
     @classmethod
     def add_shadow(cls, widget, radius=10, offset=3, color_alpha=30):
         """
         Add a drop shadow effect to a widget.
-        
+
         Args:
             widget: The widget to add shadow to
             radius (int): Shadow blur radius
             offset (int): Shadow offset
             color_alpha (int): Shadow opacity (0-255)
-            
+
         Returns:
             QGraphicsDropShadowEffect: The created shadow effect
         """
@@ -116,18 +116,18 @@ class StandardTheme:
         shadow.setOffset(0, offset)
         widget.setGraphicsEffect(shadow)
         return shadow
-    
+
     @classmethod
     def get_button_style(cls, button_type='primary', size='medium', disabled=False):
         """
         Get a standardized button style based on type and size.
-        
+
         Args:
             button_type (str): 'primary', 'secondary', 'success', 'danger', 
                               'warning', 'info', 'text', 'outline', or 'aws'
             size (str): 'small', 'medium', 'large'
             disabled (bool): Whether the button is disabled
-            
+
         Returns:
             str: CSS style string for the button
         """
@@ -149,7 +149,7 @@ class StandardTheme:
                 color: """ + cls.GRAY_500 + """;
             }
         """
-        
+
         # Size variations
         if size == 'small':
             style += """
@@ -172,7 +172,7 @@ class StandardTheme:
                     font-size: """ + cls.FONT_SIZE_MEDIUM + """;
                 }
             """
-        
+
         # Type variations
         if button_type == 'primary':
             style += """
@@ -303,20 +303,20 @@ class StandardTheme:
                     border: 1px solid """ + cls.GRAY_400 + """;
                 }
             """
-        
+
         return style
-    
+
     @classmethod
     def get_label_style(cls, type='default', size='medium', bold=False):
         """
         Get standardized label styling.
-        
+
         Args:
             type (str): 'default', 'primary', 'secondary', 'success', 'danger', 
                        'warning', 'info', 'muted'
             size (str): 'small', 'medium', 'large', 'xlarge'
             bold (bool): Whether to use bold font weight
-            
+
         Returns:
             str: CSS style string for the label
         """
@@ -324,13 +324,13 @@ class StandardTheme:
         style = """
             font-family: """ + cls.FONT_FAMILY_PRIMARY + """;
         """
-        
+
         # Add font weight if bold
         if bold:
             style += """
                 font-weight: bold;
             """
-        
+
         # Size variations
         if size == 'small':
             style += """
@@ -348,7 +348,7 @@ class StandardTheme:
             style += """
                 font-size: """ + cls.FONT_SIZE_XLARGE + """;
             """
-        
+
         # Type variations
         if type == 'primary':
             style += """
@@ -382,18 +382,18 @@ class StandardTheme:
             style += """
                 color: """ + cls.TEXT_PRIMARY + """;
             """
-        
+
         return style
-    
+
     @classmethod
     def get_frame_style(cls, type='default', elevation=0):
         """
         Get standardized frame styling.
-        
+
         Args:
             type (str): 'default', 'card', 'panel', 'paper', 'raised'
             elevation (int): Shadow elevation level (0-3)
-            
+
         Returns:
             str: CSS style string for the frame
         """
@@ -402,7 +402,7 @@ class StandardTheme:
             background-color: """ + cls.BG_DEFAULT + """;
             border-radius: """ + cls.BORDER_RADIUS_MEDIUM + """;
         """
-        
+
         # Type variations
         if type == 'card':
             style += """
@@ -430,18 +430,18 @@ class StandardTheme:
             style += """
                 border: 1px solid """ + cls.GRAY_300 + """;
             """
-        
+
         return style
-    
+
     @classmethod
     def get_card_style(cls, card_type='default', elevation=1):
         """
         Get a standardized card style with optional elevation.
-        
+
         Args:
             card_type (str): 'default', 'primary', 'secondary', 'success', 'warning', 'danger', 'info'
             elevation (int): Shadow elevation (0-3)
-            
+
         Returns:
             str: CSS style string for the card
         """
@@ -453,7 +453,7 @@ class StandardTheme:
                 padding: """ + str(cls.SPACING_UNIT * 2) + """px;
             }
         """
-        
+
         # Add border based on type
         if card_type == 'default':
             style += """
@@ -497,7 +497,7 @@ class StandardTheme:
                     border: 1px solid """ + cls.INFO_LIGHT + """;
                 }
             """
-        
+
         # Add elevation (for shadow effect via code)
         # The shadow will need to be added with cls.add_shadow()
         # This style just to ensure consistent padding with elevation
@@ -507,17 +507,17 @@ class StandardTheme:
                     margin: """ + str(elevation * 2) + """px;
                 }
             """
-        
+
         return style
-    
+
     @classmethod
     def get_input_style(cls, state='default'):
         """
         Get standardized input field styles with states.
-        
+
         Args:
             state (str): 'default', 'focus', 'error', 'success', 'disabled'
-            
+
         Returns:
             str: CSS style string for input fields
         """
@@ -580,7 +580,7 @@ class StandardTheme:
                 background-color: """ + cls.GRAY_300 + """;
             }
         """
-        
+
         # Add state-specific styles
         if state == 'error':
             style += """
@@ -608,18 +608,18 @@ class StandardTheme:
                     background-color: """ + cls.BG_DEFAULT + """;
                 }
             """
-        
+
         return style
-    
+
     @classmethod
     def get_table_style(cls, alternating_rows=True, hover_effect=True):
         """
         Get standardized table styles.
-        
+
         Args:
             alternating_rows (bool): Whether to use alternating row colors
             hover_effect (bool): Whether to include row hover effect
-            
+
         Returns:
             str: CSS style string for tables
         """
@@ -647,7 +647,7 @@ class StandardTheme:
                 border-bottom: 1px solid """ + cls.GRAY_200 + """;
             }
         """
-        
+
         # Add alternating row colors if requested
         if alternating_rows:
             style += """
@@ -655,7 +655,7 @@ class StandardTheme:
                     alternate-background-color: """ + cls.GRAY_50 + """;
                 }
             """
-        
+
         # Add hover effect if requested
         if hover_effect:
             style += """
@@ -663,14 +663,14 @@ class StandardTheme:
                     background-color: """ + cls.PRIMARY_LIGHT + """;
                 }
             """
-        
+
         return style
-    
+
     @classmethod
     def get_scrollbar_style(cls):
         """
         Get standardized scrollbar styles for a modern look.
-        
+
         Returns:
             str: CSS style string for scrollbars
         """
@@ -723,12 +723,12 @@ class StandardTheme:
                 width: 0px;
             }
         """
-    
+
     @classmethod
     def get_main_window_style(cls):
         """
         Get styling for the main application window.
-        
+
         Returns:
             str: CSS style string for main window
         """
@@ -765,12 +765,12 @@ class StandardTheme:
                 padding: 5px;
             }
         """
-    
+
     @classmethod
     def get_application_style(cls):
         """
         Get main application styling (combines main window and common elements).
-        
+
         Returns:
             str: CSS style string for application
         """
@@ -823,12 +823,12 @@ class StandardTheme:
                 margin: 4px 12px;
             }
         """
-    
+
     @classmethod
     def get_tab_style(cls):
         """
         Get standardized tab widget styling.
-        
+
         Returns:
             str: CSS style string for tab widgets
         """
@@ -868,12 +868,12 @@ class StandardTheme:
                 background-color: """ + cls.GRAY_300 + """;
             }
         """
-    
+
     @classmethod
     def get_dialog_style(cls):
         """
         Get standardized dialog styling.
-        
+
         Returns:
             str: CSS style string for dialogs
         """
@@ -900,12 +900,12 @@ class StandardTheme:
                 min-width: 80px;
             }
         """
-    
+
     @classmethod
     def get_message_box_style(cls):
         """
         Get standardized message box styling.
-        
+
         Returns:
             str: CSS style string for message boxes
         """
@@ -926,12 +926,12 @@ class StandardTheme:
                 min-height: 24px;
             }
         """
-    
+
     @classmethod
     def get_progress_style(cls):
         """
         Get standardized progress bar styling.
-        
+
         Returns:
             str: CSS style string for progress bars
         """
@@ -962,18 +962,18 @@ class StandardTheme:
                 min-width: 300px;
             }
         """
-    
+
     @classmethod
     def get_complete_application_style(cls):
         """
         Get comprehensive styling for the entire application.
-        
+
         Returns:
             str: Complete CSS style string for the application
         """
         return (
-            cls.get_main_window_style() + 
-            cls.get_input_style() + 
+            cls.get_main_window_style() +
+            cls.get_input_style() +
             cls.get_table_style() +
             cls.get_scrollbar_style() +
             cls.get_tab_style() +
@@ -981,36 +981,36 @@ class StandardTheme:
             cls.get_message_box_style() +
             cls.get_progress_style()
         )
-    
+
     @classmethod
     def create_icon_button(cls, widget, icon_name, tooltip, size=QSize(24, 24), button_type='primary'):
         """
         Create a standardized icon button.
-        
+
         Args:
             widget: Parent widget
             icon_name: QStyle.StandardPixmap or QIcon
             tooltip: Tooltip text
             size: Button size
             button_type: Button style type
-            
+
         Returns:
             QPushButton: Configured icon button
         """
         from PyQt5.QtWidgets import QPushButton
-        
+
         button = QPushButton(widget)
-        
+
         # Set icon
         if isinstance(icon_name, int):  # StandardPixmap
             button.setIcon(widget.style().standardIcon(icon_name))
         else:  # QIcon
             button.setIcon(icon_name)
-            
+
         button.setIconSize(size)
         button.setFixedSize(size.width() + 8, size.height() + 8)
         button.setToolTip(tooltip)
         button.setCursor(Qt.PointingHandCursor)
         button.setStyleSheet(cls.get_button_style(button_type))
-        
+
         return button

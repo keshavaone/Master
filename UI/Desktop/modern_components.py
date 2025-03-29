@@ -844,8 +844,19 @@ class EnhancedPIIDataCard(QFrame):
 
         # Create type label with icon
         icon_label = QLabel(self)
-        icon_label.setPixmap(self.parent().style().standardIcon(
-            self.get_type_icon(category, type_value)).pixmap(16, 16))
+        
+        # Fix: Get the StandardPixmap enum value, not a string
+        icon_enum = self.get_type_icon(category, type_value)
+        
+        if self.parent() and hasattr(self.parent(), 'style'):
+            icon = self.parent().style().standardIcon(icon_enum)
+            icon_label.setPixmap(icon.pixmap(16, 16))
+        else:
+            # Fallback if parent style is not available
+            from PyQt5.QtWidgets import QApplication
+            icon = QApplication.style().standardIcon(icon_enum)
+            icon_label.setPixmap(icon.pixmap(16, 16))
+            
         left_layout.addWidget(icon_label)
 
         # Type and category labels with improved styles
@@ -918,8 +929,17 @@ class EnhancedPIIDataCard(QFrame):
     def create_action_button(self, text, icon_name, bg_color, hover_color):
         """Create a styled action button."""
         button = QPushButton(text, self)
-        button.setIcon(self.parent().style().standardIcon(
-            getattr(self.parent().style(), icon_name)))
+        
+        # Convert string icon name to QStyle enum value
+        style_enum = getattr(QStyle, icon_name, QStyle.SP_FileIcon)
+        
+        if self.parent() and hasattr(self.parent(), 'style'):
+            button.setIcon(self.parent().style().standardIcon(style_enum))
+        else:
+            # Fallback if parent style is not available
+            from PyQt5.QtWidgets import QApplication
+            button.setIcon(QApplication.style().standardIcon(style_enum))
+            
         button.setCursor(Qt.PointingHandCursor)
         button.setStyleSheet(f"""
             QPushButton {{
@@ -937,18 +957,34 @@ class EnhancedPIIDataCard(QFrame):
         return button
 
     def get_type_icon(self, category, type_value):
-        """Get an appropriate icon based on category and type."""
+        """
+        Get an appropriate icon based on category and type.
+        
+        Returns:
+            QStyle.StandardPixmap: A standard pixmap enum value for the icon
+        """
+        # Import QStyle for StandardPixmap enum values
+        from PyQt5.QtWidgets import QStyle
+        
         # Customize icons based on data categories
-        if category.lower() in ['financial', 'finance', 'payment']:
-            return "SP_FileDialogInfoView"
-        elif category.lower() in ['personal', 'contact', 'address']:
-            return "SP_DialogApplyButton"
-        elif category.lower() in ['account', 'security', 'auth']:
-            return "SP_DialogSaveButton"
-        elif category.lower() in ['health', 'medical']:
-            return "SP_TitleBarMenuButton"
+        category_lower = category.lower()
+        type_lower = type_value.lower()
+        
+        if any(term in category_lower for term in ['financial', 'finance', 'payment', 'bank', 'credit']):
+            return QStyle.SP_FileDialogInfoView
+        elif any(term in category_lower for term in ['personal', 'contact', 'address', 'customer']):
+            return QStyle.SP_DialogApplyButton
+        elif any(term in category_lower for term in ['account', 'security', 'auth', 'password']):
+            return QStyle.SP_DialogSaveButton
+        elif any(term in category_lower for term in ['health', 'medical', 'insurance']):
+            return QStyle.SP_TitleBarMenuButton
+        elif any(term in category_lower for term in ['document', 'file', 'report']):
+            return QStyle.SP_FileDialogDetailedView
+        elif any(term in category_lower for term in ['system', 'config', 'setting']):
+            return QStyle.SP_FileDialogInfoView
         else:
-            return "SP_FileIcon"
+            # Default icon
+            return QStyle.SP_FileIcon
 
     def populate_pii_data(self):
         """Parse and display PII data with improved formatting."""
@@ -1215,10 +1251,13 @@ class EnhancedPIIDataCard(QFrame):
 
     def get_pii_field_count(self):
         """Get the number of PII fields in the data."""
-        pii_data = self.item_data.get('PII', '')
-        items = self.parse_pii_data(pii_data)
-        return len(items)
-
+        try:
+            pii_data = self.item_data.get('PII', '')
+            items = self.parse_pii_data(pii_data)
+            return len(items)
+        except Exception:
+            # Return a safe default on error
+            return 0
 
 class EnhancedModernDataDialog(QDialog):
     """
@@ -1662,6 +1701,7 @@ class EnhancedModernDataDialog(QDialog):
                 background-color: #1565C0;
             }
         """)
+        # Store "All Categories" as a string, not a boolean
         all_button.clicked.connect(
             lambda: self.filter_by_category_click("All Categories"))
         self.category_list_layout.insertWidget(0, all_button)
@@ -1683,22 +1723,33 @@ class EnhancedModernDataDialog(QDialog):
                     background-color: #E3F2FD;
                 }
             """)
+            # Use a proper lambda that captures the category value
+            # PROPER WAY - captures both the automatic checked parameter and the category
             category_button.clicked.connect(
-                lambda c=category: self.filter_by_category_click(c))
+                lambda checked=False, cat=category: self.filter_by_category_click(cat))
             self.category_list_layout.insertWidget(
                 self.category_list_layout.count() - 1, category_button)
 
+
     def filter_by_category_click(self, category):
         """Handle category selection from the category panel."""
+        # Ensure we have a string
+        # Check for incorrect parameter types
+        if not isinstance(category, str):
+            logger.warning(f"Non-string category value received: {category}, using 'All Categories' instead")
+            category = "All Categories"
+            
         # Set the category filter dropdown
         index = self.category_filter.findText(category)
         if index >= 0:
             self.category_filter.setCurrentIndex(index)
         else:
+            logger.warning(f"Category '{category}' not found in filter dropdown, resetting to 'All Categories'")
             self.category_filter.setCurrentIndex(0)  # All Categories
 
         # Apply filters
         self.apply_filters()
+
 
     def on_search_text_changed(self, text):
         """Handle search text changes with debouncing."""
