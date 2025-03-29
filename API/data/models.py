@@ -16,7 +16,7 @@ class PIIDataItem(BaseModel):
     """
     item_name: str = Field(..., description="Name of the item")
     data: str = Field(..., description="PII data value")
-
+    
     model_config = {
         "extra": "ignore"
     }
@@ -43,7 +43,7 @@ class PIIItemUpdate(PIIItemBase):
     """
     id: str = Field(..., description="Unique ID of the record", alias="_id")
     pii: str = Field(..., description="PII data as a string (typically JSON)")
-
+    
     model_config = {
         "populate_by_name": True
     }
@@ -54,7 +54,7 @@ class PIIItemDelete(BaseModel):
     Model for deleting PII data.
     """
     id: str = Field(..., description="Unique ID of the record", alias="_id")
-
+    
     model_config = {
         "populate_by_name": True
     }
@@ -65,7 +65,9 @@ class PIIItemResponse(PIIItemBase):
     Model for PII data responses.
     """
     id: str = Field(..., description="Unique ID of the record", alias="_id")
-    pii: str = Field(..., description="PII data as a string (typically JSON)")
+    pii: str = Field(..., description="PII data as a string (typically JSON)",alias="PII")
+    category: str = Field(..., description="Category of the PII data", alias="Category")
+    type: str = Field(..., description="Type of the PII data", alias="Type")
 
     model_config = {
         "json_schema_extra": {
@@ -93,26 +95,21 @@ class APIResponse(BaseModel):
     """
     Standard API response model.
     """
-    success: bool = Field(...,
-                          description="Whether the operation was successful")
+    success: bool = Field(..., description="Whether the operation was successful")
     message: str = Field(..., description="Response message")
     data: Optional[Any] = Field(None, description="Response data")
-    error: Optional[str] = Field(
-        None, description="Error message if unsuccessful")
+    error: Optional[str] = Field(None, description="Error message if unsuccessful")
 
 
 class AuditLogEntry(BaseModel):
     """
     Model for audit log entries.
     """
-    timestamp: datetime = Field(
-        default_factory=datetime.now, description="When the event occurred")
-    operation_id: str = Field(default_factory=lambda: str(
-        uuid.uuid4()), description="Unique ID for the operation")
+    timestamp: datetime = Field(default_factory=datetime.now, description="When the event occurred")
+    operation_id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Unique ID for the operation")
     event_type: str = Field(..., description="Type of event")
     message: str = Field(..., description="Event message")
     user_id: str = Field(..., description="User who performed the action")
     auth_type: str = Field(..., description="Authentication type used")
     client_ip: str = Field(..., description="Client IP address")
-    details: Optional[Dict[str, Any]] = Field(
-        None, description="Additional event details")
+    details: Optional[Dict[str, Any]] = Field(None, description="Additional event details")

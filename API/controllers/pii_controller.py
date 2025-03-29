@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request, Backgrou
 
 from api.auth.middleware import auth_required
 from api.data.models import (
-    PIIItemCreate, PIIItemUpdate, PIIItemDelete, PIIItemResponse, 
+    PIIItemCreate, PIIItemUpdate, PIIItemDelete, PIIItemResponse,
     PIISearchParams, APIResponse
 )
 from api.data.database import DatabaseHandler
@@ -39,30 +39,34 @@ async def get_all_pii_data(
     try:
         # Get client IP for audit logging
         client_ip = request.client.host if request.client else "unknown"
-        
+
         # Log the request
-        logger.info(f"Getting PII data for user: {user_info.get('sub')} from {client_ip}")
-        
+        logger.info(
+            f"Getting PII data for user: {user_info.get('sub')} from {client_ip}")
+
         # Get all items from the database
         success, items = db_handler.get_all_items()
-        
+
         if not success:
             # Handle database error
             logger.error(f"Database error: {items}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
         if search_params.category or search_params.type or search_params.search:
             # Filter items if search parameters are provided
             if search_params.category:
-                items = [item for item in items if item.get('Category') == search_params.category]
-            
+                items = [item for item in items if item.get(
+                    'Category') == search_params.category]
+
             if search_params.type:
-                items = [item for item in items if item.get('Type') == search_params.type]
-            
+                items = [item for item in items if item.get(
+                    'Type') == search_params.type]
+
             if search_params.search:
                 # Simple search - in a real application you'd want better search capabilities
                 search_term = search_params.search.lower()
                 items = [
-                    item for item in items if 
+                    item for item in items if
                     search_term in item.get('Category', '').lower() or
                     search_term in item.get('Type', '').lower()
                 ]
@@ -78,7 +82,7 @@ async def get_all_pii_data(
             else:
                 # Log decryption error but continue with other items
                 logger.warning(f"Failed to decrypt item: {item.get('_id')}")
-        
+
         # Convert to response model
         response_items = []
         for item in decrypted_items:
@@ -86,14 +90,14 @@ async def get_all_pii_data(
                 response_items.append(
                     PIIItemResponse(
                         _id=item.get('_id'),
-                        category=item.get('Category'),
-                        type=item.get('Type'),
-                        pii=item.get('PII')
+                        Category=item.get('Category'),
+                        Type=item.get('Type'),
+                        PII=item.get('PII')
                     )
                 )
             except Exception as e:
-                logger.warning(f"Failed to convert item to response model: {e}")
-        
+                logger.warning(
+                    f"Failed to convert item to response model: {e}")
         return response_items
     except HTTPException:
         # Re-raise HTTP exceptions
@@ -101,7 +105,9 @@ async def get_all_pii_data(
     except Exception as e:
         # Log and convert other exceptions to HTTP exceptions
         logger.error(f"Error getting PII data: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
+
 
 @router.post("/", response_model=APIResponse)
 async def create_pii_item(
@@ -115,22 +121,24 @@ async def create_pii_item(
     try:
         # Get client IP for audit logging
         client_ip = request.client.host if request.client else "unknown"
-        
+
         # Log the request
-        logger.info(f"Creating PII item for user: {user_info.get('sub')} from {client_ip}")
-        
+        logger.info(
+            f"Creating PII item for user: {user_info.get('sub')} from {client_ip}")
+
         # Create the item
         success, result = db_handler.create_item(
             item=item,
             user_id=user_info.get('sub'),
             auth_type=user_info.get('auth_type', 'unknown')
         )
-        
+
         if not success:
             # Handle database error
             logger.error(f"Database error: {result}")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
-        
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
+
         # Return success response
         return APIResponse(
             success=True,
@@ -143,7 +151,9 @@ async def create_pii_item(
     except Exception as e:
         # Log and convert other exceptions to HTTP exceptions
         logger.error(f"Error creating PII item: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
+
 
 @router.patch("/", response_model=APIResponse)
 async def update_pii_item(
@@ -157,18 +167,19 @@ async def update_pii_item(
     try:
         # Get client IP for audit logging
         client_ip = request.client.host if request.client else "unknown"
-        
+
         # Log the request
-        logger.info(f"Updating PII item for user: {user_info.get('sub')} from {client_ip}")
-        
+        logger.info(
+            f"Updating PII item for user: {user_info.get('sub')} from {client_ip}")
+
         # Validate that the item ID exists
         if not item.id:
             logger.error("Missing item ID in update request")
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, 
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Item ID is required for updates"
             )
-        
+
         # Update the item
         success, result = db_handler.update_item(
             item=item,
@@ -180,9 +191,11 @@ async def update_pii_item(
             # Handle database error
             logger.error(f"Database error: {result}")
             if isinstance(result, str) and "not found" in result.lower():
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Item with ID {item.id} not found")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
-        
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail=f"Item with ID {item.id} not found")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
+
         # Return success response
         return APIResponse(
             success=True,
@@ -195,7 +208,9 @@ async def update_pii_item(
     except Exception as e:
         # Log and convert other exceptions to HTTP exceptions
         logger.error(f"Error updating PII item: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
+
 
 @router.delete("/", response_model=APIResponse)
 async def delete_pii_item(
@@ -209,32 +224,35 @@ async def delete_pii_item(
     try:
         # Get client IP for audit logging
         client_ip = request.client.host if request.client else "unknown"
-        
+
         # Log the request
-        logger.info(f"Deleting PII item for user: {user_info.get('sub')} from {client_ip}")
-        
+        logger.info(
+            f"Deleting PII item for user: {user_info.get('sub')} from {client_ip}")
+
         # Validate that the item ID exists
         if not item.id:
             logger.error("Missing item ID in delete request")
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, 
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Item ID is required for deletion"
             )
-        
+
         # Delete the item
         success, result = db_handler.delete_item(
             item=item,
             user_id=user_info.get('sub'),
             auth_type=user_info.get('auth_type', 'unknown')
         )
-        
+
         if not success:
             # Handle database error
             logger.error(f"Database error: {result}")
             if isinstance(result, str) and "not found" in result.lower():
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Item with ID {item.id} not found")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
-        
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail=f"Item with ID {item.id} not found")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
+
         # Return success response
         return APIResponse(
             success=True,
@@ -247,4 +265,5 @@ async def delete_pii_item(
     except Exception as e:
         # Log and convert other exceptions to HTTP exceptions
         logger.error(f"Error deleting PII item: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
