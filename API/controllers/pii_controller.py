@@ -7,7 +7,7 @@ This module provides FastAPI endpoints for managing PII data.
 import logging
 from typing import Dict, Any, List, Union
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request, BackgroundTasks, Path, Body
+from fastapi import APIRouter, Depends, HTTPException, status, Request, BackgroundTasks
 
 from api.auth.middleware import auth_required
 from api.data.models import (
@@ -145,72 +145,42 @@ async def create_pii_item(
         logger.error(f"Error creating PII item: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
-@router.patch("/{item_id}", response_model=APIResponse)
+@router.patch("/", response_model=APIResponse)
 async def update_pii_item(
-    item_id: str = Path(..., description="ID of the PII item to update"),
-    request: Request = None,
-    update_data: Dict[str, Any] = Body(..., description="Fields to update"),
+    request: Request,
+    item: PIIItemUpdate,
     user_info: Dict[str, Any] = Depends(auth_required)
 ):
     """
     Update an existing PII data item.
-    
-    This endpoint allows updating specific fields of a PII data item.
     """
     try:
         # Get client IP for audit logging
         client_ip = request.client.host if request.client else "unknown"
         
         # Log the request
-        logger.info(f"Updating PII item {item_id} for user: {user_info.get('sub')} from {client_ip}")
-        print(f"Updating PII item {item_id} for user: {user_info.get('sub')} from {client_ip}")
-        # First check if the item exists
-        success, existing_item = db_handler.get_item_by_id(item_id)
-        if not success:
-            logger.warning(f"Item not found for update: {item_id}")
+        logger.info(f"Updating PII item for user: {user_info.get('sub')} from {client_ip}")
+        
+        # Validate that the item ID exists
+        if not item.id:
+            logger.error("Missing item ID in update request")
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"PII item with ID {item_id} not found"
-            )
-
-        # Create update model from the request data
-        try:
-            # Extract fields from update_data
-            category = update_data.get('category')
-            item_type = update_data.get('type')
-            pii = update_data.get('pii')
-            
-            # Validate required fields
-            if pii is None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="PII data must be provided"
-                )
-            
-            # Create update model
-            update_item = PIIItemUpdate(
-                _id=item_id,
-                category=category or existing_item.get('Category'),
-                type=item_type or existing_item.get('Type'),
-                pii=pii or existing_item.get('PII')
-            )
-        except Exception as e:
-            logger.error(f"Error creating update model: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid update data: {str(e)}"
+                status_code=status.HTTP_400_BAD_REQUEST, 
+                detail="Item ID is required for updates"
             )
         
         # Update the item
         success, result = db_handler.update_item(
-            item=update_item,
+            item=item,
             user_id=user_info.get('sub'),
             auth_type=user_info.get('auth_type', 'unknown')
         )
-        
+        print(result)
         if not success:
             # Handle database error
             logger.error(f"Database error: {result}")
+            if isinstance(result, str) and "not found" in result.lower():
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Item with ID {item.id} not found")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
         
         # Return success response
@@ -224,46 +194,36 @@ async def update_pii_item(
         raise
     except Exception as e:
         # Log and convert other exceptions to HTTP exceptions
-        logger.error(f"Error updating PII item {item_id}: {e}")
+        logger.error(f"Error updating PII item: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
-@router.delete("/{item_id}", response_model=APIResponse)
+@router.delete("/", response_model=APIResponse)
 async def delete_pii_item(
-    item_id: str = Path(..., description="ID of the PII item to delete"),
-    request: Request = None,
+    request: Request,
+    item: PIIItemDelete,
     user_info: Dict[str, Any] = Depends(auth_required)
 ):
     """
     Delete a PII data item.
-    
-    This endpoint permanently removes a PII data item by its ID.
     """
     try:
         # Get client IP for audit logging
         client_ip = request.client.host if request.client else "unknown"
         
         # Log the request
-        logger.info(f"Deleting PII item {item_id} for user: {user_info.get('sub')} from {client_ip}")
+        logger.info(f"Deleting PII item for user: {user_info.get('sub')} from {client_ip}")
         
-        # First check if the item exists
-        success, existing_item = db_handler.get_item_by_id(item_id)
-        if not success:
-            logger.warning(f"Item not found for deletion: {item_id}")
+        # Validate that the item ID exists
+        if not item.id:
+            logger.error("Missing item ID in delete request")
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"PII item with ID {item_id} not found"
+                status_code=status.HTTP_400_BAD_REQUEST, 
+                detail="Item ID is required for deletion"
             )
-        
-        # Create delete model
-        delete_item = PIIItemDelete(
-            _id=item_id,
-            category=existing_item.get('Category'),
-            type=existing_item.get('Type')
-        )
         
         # Delete the item
         success, result = db_handler.delete_item(
-            item=delete_item,
+            item=item,
             user_id=user_info.get('sub'),
             auth_type=user_info.get('auth_type', 'unknown')
         )
@@ -271,18 +231,20 @@ async def delete_pii_item(
         if not success:
             # Handle database error
             logger.error(f"Database error: {result}")
+            if isinstance(result, str) and "not found" in result.lower():
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Item with ID {item.id} not found")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
         
         # Return success response
         return APIResponse(
             success=True,
             message="PII item deleted successfully",
-            data={"item_id": item_id}
+            data={"item_id": item.id}
         )
     except HTTPException:
         # Re-raise HTTP exceptions
         raise
     except Exception as e:
         # Log and convert other exceptions to HTTP exceptions
-        logger.error(f"Error deleting PII item {item_id}: {e}")
+        logger.error(f"Error deleting PII item: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")

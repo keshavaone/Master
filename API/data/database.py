@@ -337,36 +337,71 @@ class DatabaseHandler:
             # Log the operation
             self.logger.info(f"Updating item with ID: {item.id} (Operation: {operation_id})")
             
-            # Encrypt the PII data
-            encrypted_pii = self.kms_handler.encrypt_to_base64(item.pii)
-            if not encrypted_pii:
-                self.logger.error(f"Failed to encrypt PII data for item: {item.id}")
-                return False, "Failed to encrypt PII data"
-            
-            # Set up update expression
-            update_expression = "SET PII = :pii, updated_at = :updated_at, updated_by = :updated_by"
+            # First check if the item exists
+            try:
+                response = self.table.get_item(Key={'_id': item.id})
+                if 'Item' not in response:
+                    self.logger.warning(f"Item not found for update: {item.id}")
+                    return False, f"Item not found with ID: {item.id}"
+                    
+                existing_item = response['Item']
+            except ClientError as e:
+                error_msg = f"DynamoDB client error checking item existence: {e}"
+                self.logger.error(error_msg)
+                return False, error_msg
+
+            # Set up update expression and expression attribute values and names
+            update_expression_parts = []
             expression_values = {
-                ":pii": encrypted_pii,
                 ":updated_at": datetime.now().isoformat(),
                 ":updated_by": user_id
             }
+            expression_names = {}  # To handle reserved keywords
             
-            # Add category and type if they're present
-            if item.category:
-                update_expression += ", Category = :category"
+            # Build update expression based on provided fields
+            if item.pii is not None:
+                # Encrypt the PII data if provided
+                encrypted_pii = self.kms_handler.encrypt_to_base64(item.pii)
+                if not encrypted_pii:
+                    self.logger.error(f"Failed to encrypt PII data for item: {item.id}")
+                    return False, "Failed to encrypt PII data"
+                    
+                update_expression_parts.append("PII = :pii")
+                expression_values[":pii"] = encrypted_pii
+            
+            # Add category if provided
+            if item.category is not None:
+                update_expression_parts.append("Category = :category")
                 expression_values[":category"] = item.category
             
-            if item.type:
-                update_expression += ", Type = :type"
+            # Add type if provided - handle as reserved keyword
+            if item.type is not None:
+                # Use expression attribute names to handle reserved keyword
+                update_expression_parts.append("#item_type = :type")
                 expression_values[":type"] = item.type
+                expression_names["#item_type"] = "Type"  # Map #item_type to the actual attribute name
+            
+            # Always update the metadata
+            update_expression_parts.append("updated_at = :updated_at")
+            update_expression_parts.append("updated_by = :updated_by")
+            
+            # Construct the final update expression
+            update_expression = "SET " + ", ".join(update_expression_parts)
+            
+            # Prepare update parameters
+            update_params = {
+                "Key": {'_id': item.id},
+                "UpdateExpression": update_expression,
+                "ExpressionAttributeValues": expression_values,
+                "ReturnValues": "ALL_NEW"
+            }
+            
+            # Add expression attribute names if any
+            if expression_names:
+                update_params["ExpressionAttributeNames"] = expression_names
             
             # Update the item
-            response = self.table.update_item(
-                Key={'_id': item.id},
-                UpdateExpression=update_expression,
-                ExpressionAttributeValues=expression_values,
-                ReturnValues="ALL_NEW"
-            )
+            response = self.table.update_item(**update_params)
             
             # Check if the operation was successful
             if response['ResponseMetadata']['HTTPStatusCode'] != 200:
@@ -386,7 +421,9 @@ class DatabaseHandler:
                     "item_id": item.id,
                     "category": item.category,
                     "type": item.type,
-                    "operation_id": operation_id
+                    "operation_id": operation_id,
+                    "updated_fields": [field for field in ["category", "type", "pii"] 
+                                    if getattr(item, field) is not None]
                 }
             )
             
