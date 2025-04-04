@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Eye, User, Lock, Database, FileText, Settings, LogOut, BarChart2, Bell, Search, Plus, RefreshCw } from 'lucide-react';
+import { Shield, Eye, User, Lock, Database, FileText, Settings, LogOut, BarChart2, Bell, Search, Plus, RefreshCw, Calendar } from 'lucide-react';
+import CalendarNotifications from './CalendarNotifications';
 
 // Main dashboard component
 const GuardDashboard = () => {
@@ -127,6 +128,14 @@ const GuardDashboard = () => {
               >
                 <FileText className="mr-3 h-5 w-5 opacity-80" />
                 Documents
+              </button>
+              
+              <button 
+                onClick={() => setActivePage('calendar')}
+                className={`flex items-center px-3 py-2 text-sm font-medium rounded-md w-full ${activePage === 'calendar' ? 'bg-blue-600 text-white' : 'hover:bg-opacity-10 hover:bg-white'}`}
+              >
+                <Calendar className="mr-3 h-5 w-5 opacity-80" />
+                Calendar
               </button>
             </div>
           </div>
@@ -256,186 +265,200 @@ const GuardDashboard = () => {
         
         {/* Main Content */}
         <main className="p-6">
-          {/* Welcome Header */}
-          <div className="flex justify-between items-center mb-6">
-            <div>
-              <h1 className="text-2xl font-bold">Welcome back, John!</h1>
-              <p className="text-sm opacity-60">Here's what's happening with your data today.</p>
-            </div>
-            
-            <div className="flex space-x-3">
-              <button className="flex items-center bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-white text-sm">
-                <Plus className="h-4 w-4 mr-2" />
-                Add New Entry
-              </button>
-              
-              <button className="flex items-center border px-3 py-2 rounded-lg text-sm"
-                style={{ borderColor: colors.border }}
-              >
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Refresh
-              </button>
-            </div>
-          </div>
+          {activePage === 'calendar' ? (
+            <CalendarNotifications darkMode={darkMode} />
+          ) : (
+            <>
+              {/* Welcome Header */}
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h1 className="text-2xl font-bold">Welcome back, John!</h1>
+                  <p className="text-sm opacity-60">Here's what's happening with your data today.</p>
+                </div>
+                
+                <div className="flex space-x-3">
+                  <button className="flex items-center bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-white text-sm">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add New Entry
+                  </button>
+                  
+                  <button className="flex items-center border px-3 py-2 rounded-lg text-sm"
+                    style={{ borderColor: colors.border }}
+                  >
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Refresh
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
           
           {/* Stats Cards */}
-          <div className="grid grid-cols-4 gap-6 mb-6">
-            <div className="rounded-xl p-4 flex flex-col" style={{ backgroundColor: colors.card, border: `1px solid ${colors.border}` }}>
-              <div className="flex justify-between items-center mb-3">
-                <h3 className="text-sm font-medium">Total Items</h3>
-                <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(59, 130, 246, 0.2)' }}>
-                  <Database className="h-5 w-5 text-blue-500" />
-                </div>
-              </div>
-              <p className="text-2xl font-bold mb-1">47</p>
-              <p className="text-xs opacity-60">+12% from last month</p>
-            </div>
-            
-            <div className="rounded-xl p-4 flex flex-col" style={{ backgroundColor: colors.card, border: `1px solid ${colors.border}` }}>
-              <div className="flex justify-between items-center mb-3">
-                <h3 className="text-sm font-medium">Categories</h3>
-                <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(245, 158, 11, 0.2)' }}>
-                  <FileText className="h-5 w-5 text-amber-500" />
-                </div>
-              </div>
-              <p className="text-2xl font-bold mb-1">5</p>
-              <p className="text-xs opacity-60">+2 new categories</p>
-            </div>
-            
-            <div className="rounded-xl p-4 flex flex-col" style={{ backgroundColor: colors.card, border: `1px solid ${colors.border}` }}>
-              <div className="flex justify-between items-center mb-3">
-                <h3 className="text-sm font-medium">Security Level</h3>
-                <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(16, 185, 129, 0.2)' }}>
-                  <Shield className="h-5 w-5 text-emerald-500" />
-                </div>
-              </div>
-              <p className="text-2xl font-bold mb-1">High</p>
-              <p className="text-xs opacity-60">All systems secure</p>
-            </div>
-            
-            <div className="rounded-xl p-4 flex flex-col" style={{ backgroundColor: colors.card, border: `1px solid ${colors.border}` }}>
-              <div className="flex justify-between items-center mb-3">
-                <h3 className="text-sm font-medium">Last Access</h3>
-                <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(239, 68, 68, 0.2)' }}>
-                  <Lock className="h-5 w-5 text-red-500" />
-                </div>
-              </div>
-              <p className="text-2xl font-bold mb-1">2h ago</p>
-              <p className="text-xs opacity-60">John (via AWS SSO)</p>
-            </div>
-          </div>
-          
-          {/* Data Table */}
-          <div className="rounded-xl overflow-hidden mb-6" style={{ backgroundColor: colors.card, border: `1px solid ${colors.border}` }}>
-            <div className="p-4 border-b" style={{ borderColor: colors.border }}>
-              <div className="flex justify-between items-center">
-                <h2 className="font-bold">Recent Data Items</h2>
-                <button className="text-sm opacity-60 hover:opacity-100">View All</button>
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="text-left text-xs uppercase tracking-wider" style={{ color: colors.textDim }}>
-                    <th className="px-4 py-3 font-medium">ID</th>
-                    <th className="px-4 py-3 font-medium">Category</th>
-                    <th className="px-4 py-3 font-medium">Type</th>
-                    <th className="px-4 py-3 font-medium">Last Updated</th>
-                    <th className="px-4 py-3 font-medium">Status</th>
-                    <th className="px-4 py-3 font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y" style={{ borderColor: colors.border }}>
-                  {filteredData.map(item => (
-                    <tr key={item.id} className="text-sm hover:bg-black hover:bg-opacity-10">
-                      <td className="px-4 py-3"># {item.id.toString().padStart(4, '0')}</td>
-                      <td className="px-4 py-3">{item.category}</td>
-                      <td className="px-4 py-3">{item.type}</td>
-                      <td className="px-4 py-3">{item.updated}</td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${item.sensitive ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
-                          {item.sensitive ? 'Sensitive' : 'Standard'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex space-x-2">
-                          <button className="p-1 rounded hover:bg-white hover:bg-opacity-10">
-                            <Eye className="h-4 w-4" />
-                          </button>
-                          <button className="p-1 rounded hover:bg-white hover:bg-opacity-10">
-                            <Settings className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="p-4 border-t" style={{ borderColor: colors.border }}>
-              <div className="flex justify-between items-center text-sm">
-                <span>Showing {filteredData.length} of {dataItems.length} entries</span>
-                <div className="flex space-x-1">
-                  <button className="px-3 py-1 rounded border" style={{ borderColor: colors.border }}>Previous</button>
-                  <button className="px-3 py-1 rounded bg-blue-600 text-white">1</button>
-                  <button className="px-3 py-1 rounded border" style={{ borderColor: colors.border }}>Next</button>
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          {/* Activity Log */}
-          <div className="rounded-xl overflow-hidden" style={{ backgroundColor: colors.card, border: `1px solid ${colors.border}` }}>
-            <div className="p-4 border-b" style={{ borderColor: colors.border }}>
-              <h2 className="font-bold">Recent Activity</h2>
-            </div>
-            <div className="p-4">
-              <div className="space-y-4">
-                <div className="flex items-start">
-                  <div className="h-8 w-8 rounded-full bg-blue-500 bg-opacity-20 flex items-center justify-center mr-3">
-                    <Eye className="h-4 w-4 text-blue-500" />
+          {activePage !== 'calendar' && (
+            <>
+              <div className="grid grid-cols-4 gap-6 mb-6">
+                <div className="rounded-xl p-4 flex flex-col" style={{ backgroundColor: colors.card, border: `1px solid ${colors.border}` }}>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="text-sm font-medium">Total Items</h3>
+                    <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(59, 130, 246, 0.2)' }}>
+                      <Database className="h-5 w-5 text-blue-500" />
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm">You viewed <strong>Bank Account</strong> data</p>
-                    <p className="text-xs opacity-60">2 hours ago</p>
-                  </div>
+                  <p className="text-2xl font-bold mb-1">47</p>
+                  <p className="text-xs opacity-60">+12% from last month</p>
                 </div>
                 
-                <div className="flex items-start">
-                  <div className="h-8 w-8 rounded-full bg-green-500 bg-opacity-20 flex items-center justify-center mr-3">
-                    <Plus className="h-4 w-4 text-green-500" />
+                <div className="rounded-xl p-4 flex flex-col" style={{ backgroundColor: colors.card, border: `1px solid ${colors.border}` }}>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="text-sm font-medium">Categories</h3>
+                    <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(245, 158, 11, 0.2)' }}>
+                      <FileText className="h-5 w-5 text-amber-500" />
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm">Added new <strong>Credit Card</strong> entry</p>
-                    <p className="text-xs opacity-60">5 hours ago</p>
-                  </div>
+                  <p className="text-2xl font-bold mb-1">5</p>
+                  <p className="text-xs opacity-60">+2 new categories</p>
                 </div>
                 
-                <div className="flex items-start">
-                  <div className="h-8 w-8 rounded-full bg-amber-500 bg-opacity-20 flex items-center justify-center mr-3">
-                    <Settings className="h-4 w-4 text-amber-500" />
+                <div className="rounded-xl p-4 flex flex-col" style={{ backgroundColor: colors.card, border: `1px solid ${colors.border}` }}>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="text-sm font-medium">Security Level</h3>
+                    <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(16, 185, 129, 0.2)' }}>
+                      <Shield className="h-5 w-5 text-emerald-500" />
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm">Updated <strong>Home Address</strong> information</p>
-                    <p className="text-xs opacity-60">Yesterday</p>
-                  </div>
+                  <p className="text-2xl font-bold mb-1">High</p>
+                  <p className="text-xs opacity-60">All systems secure</p>
                 </div>
                 
-                <div className="flex items-start">
-                  <div className="h-8 w-8 rounded-full bg-red-500 bg-opacity-20 flex items-center justify-center mr-3">
-                    <LogOut className="h-4 w-4 text-red-500" />
+                <div className="rounded-xl p-4 flex flex-col" style={{ backgroundColor: colors.card, border: `1px solid ${colors.border}` }}>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="text-sm font-medium">Last Access</h3>
+                    <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(239, 68, 68, 0.2)' }}>
+                      <Lock className="h-5 w-5 text-red-500" />
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm">Logged out of session</p>
-                    <p className="text-xs opacity-60">2 days ago</p>
+                  <p className="text-2xl font-bold mb-1">2h ago</p>
+                  <p className="text-xs opacity-60">John (via AWS SSO)</p>
+                </div>
+              </div>
+              
+              {/* Data Table */}
+            </>
+          )}
+          {activePage !== 'calendar' && (
+            <>
+              <div className="rounded-xl overflow-hidden mb-6" style={{ backgroundColor: colors.card, border: `1px solid ${colors.border}` }}>
+                <div className="p-4 border-b" style={{ borderColor: colors.border }}>
+                  <div className="flex justify-between items-center">
+                    <h2 className="font-bold">Recent Data Items</h2>
+                    <button className="text-sm opacity-60 hover:opacity-100">View All</button>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="text-left text-xs uppercase tracking-wider" style={{ color: colors.textDim }}>
+                        <th className="px-4 py-3 font-medium">ID</th>
+                        <th className="px-4 py-3 font-medium">Category</th>
+                        <th className="px-4 py-3 font-medium">Type</th>
+                        <th className="px-4 py-3 font-medium">Last Updated</th>
+                        <th className="px-4 py-3 font-medium">Status</th>
+                        <th className="px-4 py-3 font-medium">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y" style={{ borderColor: colors.border }}>
+                      {filteredData.map(item => (
+                        <tr key={item.id} className="text-sm hover:bg-black hover:bg-opacity-10">
+                          <td className="px-4 py-3"># {item.id.toString().padStart(4, '0')}</td>
+                          <td className="px-4 py-3">{item.category}</td>
+                          <td className="px-4 py-3">{item.type}</td>
+                          <td className="px-4 py-3">{item.updated}</td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${item.sensitive ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
+                              {item.sensitive ? 'Sensitive' : 'Standard'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex space-x-2">
+                              <button className="p-1 rounded hover:bg-white hover:bg-opacity-10">
+                                <Eye className="h-4 w-4" />
+                              </button>
+                              <button className="p-1 rounded hover:bg-white hover:bg-opacity-10">
+                                <Settings className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="p-4 border-t" style={{ borderColor: colors.border }}>
+                  <div className="flex justify-between items-center text-sm">
+                    <span>Showing {filteredData.length} of {dataItems.length} entries</span>
+                    <div className="flex space-x-1">
+                      <button className="px-3 py-1 rounded border" style={{ borderColor: colors.border }}>Previous</button>
+                      <button className="px-3 py-1 rounded bg-blue-600 text-white">1</button>
+                      <button className="px-3 py-1 rounded border" style={{ borderColor: colors.border }}>Next</button>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-            <div className="p-4 border-t" style={{ borderColor: colors.border }}>
-              <button className="text-sm text-blue-500 hover:text-blue-600">View All Activity</button>
-            </div>
-          </div>
+              
+              {/* Activity Log */}
+              <div className="rounded-xl overflow-hidden" style={{ backgroundColor: colors.card, border: `1px solid ${colors.border}` }}>
+                <div className="p-4 border-b" style={{ borderColor: colors.border }}>
+                  <h2 className="font-bold">Recent Activity</h2>
+                </div>
+                <div className="p-4">
+                  <div className="space-y-4">
+                    <div className="flex items-start">
+                      <div className="h-8 w-8 rounded-full bg-blue-500 bg-opacity-20 flex items-center justify-center mr-3">
+                        <Eye className="h-4 w-4 text-blue-500" />
+                      </div>
+                      <div>
+                        <p className="text-sm">You viewed <strong>Bank Account</strong> data</p>
+                        <p className="text-xs opacity-60">2 hours ago</p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-start">
+                      <div className="h-8 w-8 rounded-full bg-green-500 bg-opacity-20 flex items-center justify-center mr-3">
+                        <Plus className="h-4 w-4 text-green-500" />
+                      </div>
+                      <div>
+                        <p className="text-sm">Added new <strong>Credit Card</strong> entry</p>
+                        <p className="text-xs opacity-60">5 hours ago</p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-start">
+                      <div className="h-8 w-8 rounded-full bg-amber-500 bg-opacity-20 flex items-center justify-center mr-3">
+                        <Settings className="h-4 w-4 text-amber-500" />
+                      </div>
+                      <div>
+                        <p className="text-sm">Updated <strong>Home Address</strong> information</p>
+                        <p className="text-xs opacity-60">Yesterday</p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-start">
+                      <div className="h-8 w-8 rounded-full bg-red-500 bg-opacity-20 flex items-center justify-center mr-3">
+                        <LogOut className="h-4 w-4 text-red-500" />
+                      </div>
+                      <div>
+                        <p className="text-sm">Logged out of session</p>
+                        <p className="text-xs opacity-60">2 days ago</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="p-4 border-t" style={{ borderColor: colors.border }}>
+                  <button className="text-sm text-blue-500 hover:text-blue-600">View All Activity</button>
+                </div>
+              </div>
+            </>
+          )}
         </main>
       </div>
     </div>

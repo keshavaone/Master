@@ -115,4 +115,23 @@ export const systemAPI = {
   getHealthCheck: () => api.get('/system/health')
 };
 
+// Calendar API
+export const calendarAPI = {
+  sendCalendarSummary: (daysAhead = 0, method = "whatsapp", recipient = null) => {
+    const params = { days_ahead: daysAhead };
+    if (method) params.method = method;
+    if (recipient) params.recipient = recipient;
+    
+    return api.post('/api/calendar/send-summary', params);
+  },
+  
+  listSubscriptions: () => api.get('/api/calendar/subscriptions'),
+  
+  addSubscription: (name, url) => api.post('/api/calendar/subscription', { name, url }),
+  
+  removeSubscription: (urlOrName) => api.delete('/api/calendar/subscription', { 
+    data: { url_or_name: urlOrName } 
+  })
+};
+
 export default api;

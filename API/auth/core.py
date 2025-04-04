@@ -16,7 +16,8 @@ logger.setLevel(logging.INFO)
 
 class AuthSettings:
     """Configuration settings for authentication."""
-    JWT_SECRET = os.environ.get("AUTH_JWT_SECRET")
+    # Set a default JWT_SECRET for development if not found in environment
+    JWT_SECRET = os.environ.get("AUTH_JWT_SECRET") or "2813a62c25fb202b3b8ab92bae12c13591162cd428805af1f143d3223d615338"
     JWT_ALGORITHM = os.environ.get("AUTH_JWT_ALGORITHM", "HS256")
     TOKEN_EXPIRE_MINUTES = int(os.environ.get("AUTH_TOKEN_EXPIRE_MINUTES", "60"))
     REQUIRE_AUTH = os.environ.get("REQUIRE_AUTH", "true").lower() == "true"

@@ -13,6 +13,10 @@ import time
 from collections import Counter
 from contextlib import asynccontextmanager
 from typing import Dict, Any
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 from fastapi import FastAPI, Request, status, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +29,7 @@ from api.controllers.categories_controller import router as categories_router
 from api.controllers.system_controller import router as system_router
 from api.controllers.activity_controller import router as activity_router
 from api.controllers.auth_enhanced_controller import router as auth_enhanced_router
+from api.controllers.calendar_controller import router as calendar_router
 from api.encryption import get_kms_handler
 
 # Configure logging
@@ -84,6 +89,7 @@ app.include_router(pii_enhanced_router)   # New enhanced PII router
 app.include_router(categories_router)     # New categories router
 app.include_router(system_router)
 app.include_router(activity_router)       # New activity router
+app.include_router(calendar_router)       # New calendar router
 
 # Set up CORS for the React frontend
 origins = [

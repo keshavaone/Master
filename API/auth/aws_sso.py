@@ -12,7 +12,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 from api.auth.core import AuthSettings, AuthResult
-from api.auth.jwt_handler import create_token
+from api.auth.jwt_handler import create_access_token
 
 # Configure logging
 logger = logging.getLogger("api.auth.aws_sso")
@@ -102,7 +102,7 @@ def authenticate_with_aws_credentials(
             "auth_type": "aws_sso"
         }
         # Create a JWT token
-        token, expires_at = create_token(
+        token, expires_at = create_access_token(
             user_id=user_id,
             user_data=user_data,
             expires_minutes=60  # 1 hour by default
