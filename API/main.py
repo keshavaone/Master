@@ -21,10 +21,10 @@ load_dotenv()
 from fastapi import FastAPI, Request, status, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 from api.auth import auth_router, init_auth_system
 from api.controllers.pii_enhanced_controller import router as pii_router
-from api.controllers.pii_enhanced_controller import router as pii_enhanced_router
 from api.controllers.categories_controller import router as categories_router
 from api.controllers.system_controller import router as system_router
 from api.controllers.activity_controller import router as activity_router
@@ -84,17 +84,18 @@ app = FastAPI(
 # Include routers
 app.include_router(auth_router)
 app.include_router(auth_enhanced_router)  # New enhanced auth router
-app.include_router(pii_router)
-app.include_router(pii_enhanced_router)   # New enhanced PII router
-app.include_router(categories_router)     # New categories router
+app.include_router(pii_router)           # PII data router
+app.include_router(categories_router)    # Categories router
 app.include_router(system_router)
-app.include_router(activity_router)       # New activity router
-app.include_router(calendar_router)       # New calendar router
+app.include_router(activity_router)      # Activity router
+app.include_router(calendar_router)      # Calendar router
 
 # Set up CORS for the React frontend
 origins = [
     "http://localhost:8000",
-    "http://localhost:3000",  
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",  
+    "http://127.0.0.1:8000",
     "https://guard-dashboard.example.com",  # Add your React app domain
     "*"  # For development - restrict in production
 ]
@@ -103,8 +104,9 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["X-Total-Count", "X-Page", "X-Per-Page", "X-Total-Pages"]
 )
 
 # Middleware to add pagination headers

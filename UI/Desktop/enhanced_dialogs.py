@@ -17,7 +17,7 @@ import ast
 import re
 import logging
 import traceback
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Tuple, Optional, Union
 
 from UI.Desktop.standard_theme import StandardTheme
 from data_validation import InputValidator, DataValidator
@@ -461,55 +461,129 @@ class EnhancedDataItemDialog(QDialog):
         
         main_layout.addLayout(button_layout)
     
-    def process_pii_data(self):
-        """Process existing PII data and create field inputs."""
+    def process_pii_data(self, item: Dict[str, Any]) -> Tuple[bool, Union[Dict[str, Any], str]]:
+        """
+        Process and decrypt PII data in an item, handling both outer and inner encryption layers.
+        
+        Args:
+            item (Dict): Item containing PII data
+            
+        Returns:
+            Tuple[bool, Union[Dict, str]]: Success flag and processed item or error message
+        """
         try:
-            pii_data = self.item_data.get('PII', '')
-            pii_items = []
+            # Clone the item to avoid modifying the original
+            processed_item = item.copy()
             
-            # Try to parse PII data from string if needed
-            if isinstance(pii_data, str):
-                try:
-                    # Try to parse as a list of dictionaries
-                    pii_items = ast.literal_eval(pii_data)
-                    
-                    # Handle various formats
-                    if isinstance(pii_items, list):
-                        # List of dictionaries is the expected format
-                        pass
-                    elif isinstance(pii_items, dict):
-                        # Single dictionary, convert to list
-                        pii_items = [pii_items]
-                    else:
-                        # Other formats, create a single item
-                        pii_items = [{"Item Name": "Data", "Data": str(pii_items)}]
-                except (ValueError, SyntaxError):
-                    # If parsing fails, treat as raw text
-                    pii_items = [{"Item Name": "Data", "Data": pii_data}]
-            elif isinstance(pii_data, list):
-                # Already a list
-                pii_items = pii_data
-            else:
-                # Other type, convert to string
-                pii_items = [{"Item Name": "Data", "Data": str(pii_data)}]
-            
-            # Create inputs for each PII item
-            for i, item in enumerate(pii_items):
-                name = item.get("Item Name", "")
-                value = item.get("Data", "")
+            # Identify the PII field
+            pii_field = None
+            if 'PII' in processed_item:
+                pii_field = 'PII'
+            elif 'Data' in processed_item:
+                pii_field = 'Data'
                 
-                # Create the field input
-                self.add_pii_field(name, value, i, len(pii_items) > 1)
+            if not pii_field:
+                return True, processed_item  # No PII field to process
+                
+            encrypted_data = processed_item[pii_field]
+            print(f"Processing PII field: {pii_field}, type: {type(encrypted_data)}")
             
-            # Add an empty field if no items were created
-            if not pii_items:
-                self.add_pii_field()
+            # If it's a dict (DynamoDB native format), extract the value
+            if isinstance(encrypted_data, dict):
+                if 'S' in encrypted_data:
+                    encrypted_data = encrypted_data['S']
+                elif 'B' in encrypted_data:
+                    encrypted_data = encrypted_data['B']
+                    
+            # Try to decrypt the outer layer
+            if isinstance(encrypted_data, str):
+                # Check if it's already JSON (not encrypted)
+                if encrypted_data.startswith('{') or encrypted_data.startswith('['):
+                    try:
+                        import json
+                        json.loads(encrypted_data)  # This will raise an exception if not valid JSON
+                        print("PII data is already valid JSON")
+                        pii_data = encrypted_data
+                    except json.JSONDecodeError:
+                        print("Looks like JSON but isn't valid, trying decryption")
+                        # Try to decrypt
+                        pii_data = self.kms_handler.decrypt_to_string(encrypted_data)
+                else:
+                    # Standard decryption
+                    pii_data = self.kms_handler.decrypt_to_string(encrypted_data)
+                    
+                    # If standard decryption fails, try the specialized method
+                    if not pii_data and hasattr(self.kms_handler, 'decrypt_pii_data'):
+                        print("Trying specialized decrypt_pii_data method")
+                        pii_data = self.kms_handler.decrypt_pii_data(encrypted_data)
+            else:
+                # Binary data
+                decrypted = self.kms_handler.decrypt(encrypted_data)
+                pii_data = decrypted.decode('utf-8') if decrypted else None
+            
+            if not pii_data:
+                print("Failed to decrypt PII data, returning original item")
+                return True, processed_item
+                
+            print(f"Successfully decrypted outer PII data: {pii_data[:50]}...")
+            processed_item[pii_field] = pii_data
+            
+            # Now process inner fields if it's JSON
+            try:
+                import json
+                import ast
+                
+                # Try to parse the PII data
+                parsed_data = None
+                if isinstance(pii_data, str):
+                    if pii_data.startswith('[') or pii_data.startswith('{'):
+                        try:
+                            parsed_data = json.loads(pii_data)
+                            print(f"Successfully parsed PII as JSON, type: {type(parsed_data)}")
+                        except json.JSONDecodeError:
+                            try:
+                                parsed_data = ast.literal_eval(pii_data)
+                                print(f"Successfully parsed PII using ast, type: {type(parsed_data)}")
+                            except (ValueError, SyntaxError):
+                                print("Failed to parse as JSON or Python literal")
+                
+                # If we have a list of dictionaries, check for encrypted values
+                if isinstance(parsed_data, list):
+                    any_value_decrypted = False
+                    
+                    for item_dict in parsed_data:
+                        if isinstance(item_dict, dict) and 'value' in item_dict:
+                            value = item_dict['value']
+                            
+                            # Check if value is encrypted (Z0FB pattern)
+                            if isinstance(value, str) and value.startswith('Z0FB'):
+                                print(f"Found encrypted inner value: {value[:20]}...")
+                                
+                                # Try to decrypt the value using our specialized method
+                                if hasattr(self.kms_handler, 'decrypt_pii_data'):
+                                    decrypted_value = self.kms_handler.decrypt_pii_data(value)
+                                    if decrypted_value:
+                                        item_dict['value'] = decrypted_value
+                                        any_value_decrypted = True
+                                        print(f"Successfully decrypted inner value: {decrypted_value[:20]}...")
+                                    else:
+                                        print("Failed to decrypt inner value")
+                    
+                    # If we decrypted any values, update the item
+                    if any_value_decrypted:
+                        processed_item[pii_field] = json.dumps(parsed_data)
+                        print("Updated item with decrypted inner values")
+            
+            except Exception as parse_error:
+                print(f"Error processing inner values: {parse_error}")
+                # Continue with the item as is, with outer PII decrypted
+                
+            return True, processed_item
+                
         except Exception as e:
-            logger.error(f"Error processing PII data: {str(e)}")
-            logger.error(traceback.format_exc())
-            
-            # Add a default empty field if processing fails
-            self.add_pii_field()
+            error_msg = f"Error processing PII data: {e}"
+            print(error_msg)
+            return False, error_msg
     
     def add_pii_field(self, name="", value="", index=None, can_remove=True):
         """

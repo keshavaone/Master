@@ -11,7 +11,7 @@ from api.encryption.kms_handler import KMSHandler
 from api.encryption.store_secrets import get_secret
 
 __all__ = [
-    "KMSHandler"
+    "KMSHandler",
     "get_kms_handler"
 ]
 
@@ -35,8 +35,35 @@ def get_kms_handler() -> KMSHandler:
         # Initialize with secret if available
         secret_name = os.environ.get('KMS_SECRET_NAME')
         if secret_name:
+            try:
+                # Get secret value and parse it
+                secret_value = get_secret()
+                if secret_value:
+                    secret_data = ast.literal_eval(secret_value)
+                    actual_secret_name = secret_data.get(secret_name)
+                    
+                    # Initialize with the actual secret name
+                    if actual_secret_name:
+                        print(f"Initializing KMS handler with secret: {actual_secret_name}")
+                        success = _kms_handler.initialize_from_secret(actual_secret_name)
+                        if not success:
+                            print("Failed to initialize KMS handler with secret")
+                    else:
+                        print(f"Secret name {secret_name} not found in secret data")
+                else:
+                    print("Failed to retrieve secret value")
+            except Exception as e:
+                print(f"Error initializing KMS handler with secret: {e}")
+                # Fall back to environment variable
+                print("Falling back to environment variable for KMS initialization")
+                _kms_handler.initialize_from_secret("env-key")
+        else:
+            # No secret name provided, initialize with development mode
+            print("No KMS_SECRET_NAME provided, initializing with development mode")
+            _kms_handler.initialize_from_secret("dev-key")
             
-            secret_name = ast.literal_eval(get_secret()).get(secret_name,None)
-            _kms_handler.initialize_from_secret(secret_name)
+        # Verify initialization
+        if not _kms_handler.initialized:
+            print("WARNING: KMS handler was not properly initialized!")
         
     return _kms_handler

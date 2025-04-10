@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Eye, User, Lock, Database, FileText, Settings, LogOut, BarChart2, Bell, Search, Plus, RefreshCw, Calendar } from 'lucide-react';
+import { Shield, Eye, User, Lock, Database, FileText, Settings, LogOut, BarChart2, Bell, Search, Plus, RefreshCw, Calendar, Key } from 'lucide-react';
 import CalendarNotifications from './CalendarNotifications';
+import { dataAPI } from '../services/api';
 
 // Main dashboard component
 const GuardDashboard = () => {
@@ -10,6 +11,9 @@ const GuardDashboard = () => {
   const [notifications] = useState(3);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(null);
+  const [piiData, setPiiData] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedPiiItem, setSelectedPiiItem] = useState(null);
   
   // Sample data
   const categories = [
@@ -61,6 +65,73 @@ const GuardDashboard = () => {
   };
   
   const sessionPercentage = (sessionTime / (45 * 60)) * 100;
+  
+  // Function to fetch PII data from AWS through API
+  const fetchPiiData = async () => {
+    try {
+      setLoading(true);
+      setSelectedPiiItem(null); // Clear any selected item
+      
+      console.log("Calling PII API from Dashboard");
+      const response = await dataAPI.getAllItems();
+      console.log("PII API Response in Dashboard:", response);
+      
+      if (response && response.data) {
+        console.log("Setting PII data:", response.data);
+        setPiiData(response.data);
+        setActivePage('pii-data');
+      } else {
+        console.error("Invalid API response format:", response);
+        alert("Received invalid data format from API. Please try again.");
+      }
+    } catch (error) {
+      console.error("Error fetching PII data:", error);
+      alert("Failed to fetch PII data. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Function to view details of a PII item
+  const viewPiiItemDetails = async (itemId) => {
+    try {
+      setLoading(true);
+      console.log("Fetching details for PII item ID:", itemId);
+      
+      // Find item in local data first if possible (to avoid extra API calls)
+      const localItem = piiData.find(item => (item.id === itemId || item._id === itemId));
+      
+      if (localItem && process.env.NODE_ENV === 'development') {
+        console.log("Using local item data:", localItem);
+        setSelectedPiiItem(localItem);
+      } else {
+        // Fetch from API
+        console.log("Fetching item from API");
+        const response = await dataAPI.getItemById(itemId);
+        console.log("API response:", response);
+        
+        // Normalize data if needed
+        const responseData = response.data;
+        
+        // The API might return different formats - normalize here
+        const normalizedItem = {
+          ...responseData,
+          // Ensure consistent property names
+          id: responseData.id || responseData._id,
+          category: responseData.category || responseData.Category,
+          type: responseData.type || responseData.Type,
+          // Handle PII data formatting in the render function
+        };
+        
+        setSelectedPiiItem(normalizedItem);
+      }
+    } catch (error) {
+      console.error("Error fetching PII item details:", error);
+      alert("Failed to fetch item details. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
   
   // For simplicity, we'll handle most UI updates through state
   
@@ -136,6 +207,14 @@ const GuardDashboard = () => {
               >
                 <Calendar className="mr-3 h-5 w-5 opacity-80" />
                 Calendar
+              </button>
+              
+              <button 
+                onClick={fetchPiiData}
+                className={`flex items-center px-3 py-2 text-sm font-medium rounded-md w-full ${activePage === 'pii-data' ? 'bg-blue-600 text-white' : 'hover:bg-opacity-10 hover:bg-white'}`}
+              >
+                <Key className="mr-3 h-5 w-5 opacity-80" />
+                PII Data
               </button>
             </div>
           </div>
@@ -267,6 +346,240 @@ const GuardDashboard = () => {
         <main className="p-6">
           {activePage === 'calendar' ? (
             <CalendarNotifications darkMode={darkMode} />
+          ) : activePage === 'pii-data' ? (
+            <>
+              {/* PII Data Header */}
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h1 className="text-2xl font-bold">PII Data from AWS</h1>
+                  <p className="text-sm opacity-60">View your personal identifiable information securely.</p>
+                </div>
+                
+                <div className="flex space-x-3">
+                  <button 
+                    className="flex items-center bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-white text-sm"
+                    onClick={() => fetchPiiData()}
+                    disabled={loading}
+                  >
+                    <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                    {loading ? 'Loading...' : 'Refresh Data'}
+                  </button>
+                </div>
+              </div>
+              
+              {/* PII Data Table */}
+              <div className="rounded-xl overflow-hidden mb-6" style={{ backgroundColor: colors.card, border: `1px solid ${colors.border}` }}>
+                <div className="p-4 border-b" style={{ borderColor: colors.border }}>
+                  <div className="flex justify-between items-center">
+                    <h2 className="font-bold">Personal Identifiable Information</h2>
+                    <span className="text-sm bg-blue-500 bg-opacity-20 text-blue-300 px-2 py-0.5 rounded-full">
+                      {piiData.length} items
+                    </span>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="text-left text-xs uppercase tracking-wider" style={{ color: colors.textDim }}>
+                        <th className="px-4 py-3 font-medium">ID</th>
+                        <th className="px-4 py-3 font-medium">Category</th>
+                        <th className="px-4 py-3 font-medium">Type</th>
+                        <th className="px-4 py-3 font-medium">Security Level</th>
+                        <th className="px-4 py-3 font-medium">Last Updated</th>
+                        <th className="px-4 py-3 font-medium">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y" style={{ borderColor: colors.border }}>
+                      {loading ? (
+                        <tr>
+                          <td colSpan="6" className="px-4 py-10 text-center">
+                            <div className="flex flex-col items-center">
+                              <RefreshCw className="h-8 w-8 animate-spin mb-2" style={{ color: colors.accent }} />
+                              <p>Loading PII data...</p>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : piiData.length === 0 ? (
+                        <tr>
+                          <td colSpan="6" className="px-4 py-10 text-center">
+                            <p>No PII data available. Try refreshing or adding new data.</p>
+                          </td>
+                        </tr>
+                      ) : (
+                        piiData.map((item, index) => (
+                          <tr key={item.id || item._id || index} className="text-sm hover:bg-black hover:bg-opacity-10">
+                            <td className="px-4 py-3">#{item.id || item._id || `item-${index}`}</td>
+                            <td className="px-4 py-3">{item.category || item.Category || 'Unknown'}</td>
+                            <td className="px-4 py-3">{item.type || item.Type || 'Unknown'}</td>
+                            <td className="px-4 py-3">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                                (item.securityLevel === 'high' || item.category === 'Financial' || item.Category === 'Financial' || 
+                                 item.category === 'Medical' || item.Category === 'Medical')
+                                  ? 'bg-red-100 text-red-800' 
+                                  : (item.securityLevel === 'medium' || item.category === 'Personal' || item.Category === 'Personal')
+                                  ? 'bg-yellow-100 text-yellow-800'
+                                  : 'bg-green-100 text-green-800'
+                              }`}>
+                                {item.securityLevel === 'high' ? 'High' : 
+                                 item.securityLevel === 'medium' ? 'Medium' : 
+                                 item.category === 'Financial' || item.Category === 'Financial' || 
+                                 item.category === 'Medical' || item.Category === 'Medical' ? 'High' :
+                                 item.category === 'Personal' || item.Category === 'Personal' ? 'Medium' : 'Low'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">{item.lastUpdated || 
+                              (item.updated_at ? new Date(item.updated_at).toLocaleDateString() : 
+                              (item.created_at ? new Date(item.created_at).toLocaleDateString() : 'N/A'))}</td>
+                            <td className="px-4 py-3">
+                              <div className="flex space-x-2">
+                                <button 
+                                  className="p-1 rounded hover:bg-white hover:bg-opacity-10" 
+                                  title="View"
+                                  onClick={() => viewPiiItemDetails(item.id || item._id)}
+                                >
+                                  <Eye className="h-4 w-4" />
+                                </button>
+                                <button className="p-1 rounded hover:bg-white hover:bg-opacity-10" title="Settings">
+                                  <Settings className="h-4 w-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              
+              {/* PII Item Detail View */}
+              {selectedPiiItem && (
+                <div className="rounded-xl overflow-hidden mb-6" style={{ backgroundColor: colors.card, border: `1px solid ${colors.border}` }}>
+                  <div className="p-4 border-b" style={{ borderColor: colors.border }}>
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center">
+                        <button 
+                          className="mr-3 p-1.5 rounded-full hover:bg-white hover:bg-opacity-10"
+                          onClick={() => setSelectedPiiItem(null)}
+                        >
+                          &larr;
+                        </button>
+                        <h2 className="font-bold">PII Item Details</h2>
+                      </div>
+                      <span className={`text-sm px-2 py-0.5 rounded-full ${
+                        selectedPiiItem.securityLevel === 'high' 
+                          ? 'bg-red-500 bg-opacity-20 text-red-300' 
+                          : selectedPiiItem.securityLevel === 'medium'
+                          ? 'bg-yellow-500 bg-opacity-20 text-yellow-300'
+                          : 'bg-green-500 bg-opacity-20 text-green-300'
+                      }`}>
+                        {selectedPiiItem.securityLevel === 'high' ? 'High Security' : 
+                         selectedPiiItem.securityLevel === 'medium' ? 'Medium Security' : 'Low Security'}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="p-6 space-y-6">
+                    <div className="grid grid-cols-2 gap-6">
+                      <div>
+                        <h3 className="text-sm font-medium mb-2 opacity-70">Category</h3>
+                        <p className="text-lg">{selectedPiiItem.category || selectedPiiItem.Category || 'N/A'}</p>
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-medium mb-2 opacity-70">Type</h3>
+                        <p className="text-lg">{selectedPiiItem.type || selectedPiiItem.Type || 'N/A'}</p>
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-medium mb-2 opacity-70">Last Updated</h3>
+                        <p className="text-lg">{
+                          selectedPiiItem.lastUpdated || 
+                          (selectedPiiItem.updated_at ? new Date(selectedPiiItem.updated_at).toLocaleString() : 
+                           (selectedPiiItem.created_at ? new Date(selectedPiiItem.created_at).toLocaleString() : 'N/A'))
+                        }</p>
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-medium mb-2 opacity-70">Created By</h3>
+                        <p className="text-lg">{selectedPiiItem.createdBy || selectedPiiItem.created_by || 'N/A'}</p>
+                      </div>
+                    </div>
+                    
+                    <div className="border-t pt-6" style={{ borderColor: colors.border }}>
+                      <h3 className="text-lg font-medium mb-4">PII Data Fields</h3>
+                      <div className="space-y-4">
+                        {(() => {
+                          // Handle different PII data formats
+                          let piiFields = [];
+                          
+                          if (selectedPiiItem.piiData && selectedPiiItem.piiData.length > 0) {
+                            // Standard format
+                            piiFields = selectedPiiItem.piiData;
+                          } else if (selectedPiiItem.PII) {
+                            try {
+                              // Try to parse PII data if it's a string
+                              const piiData = typeof selectedPiiItem.PII === 'string' 
+                                ? JSON.parse(selectedPiiItem.PII) 
+                                : selectedPiiItem.PII;
+                              
+                              if (Array.isArray(piiData)) {
+                                // Format from backend might be different
+                                piiFields = piiData.map(item => ({
+                                  name: item.name || item["Item Name"] || Object.keys(item)[0] || "Field",
+                                  value: item.value || item["Data"] || item[Object.keys(item)[0]] || "N/A"
+                                }));
+                              } else if (typeof piiData === 'object') {
+                                // Handle object format
+                                piiFields = Object.entries(piiData).map(([key, value]) => ({
+                                  name: key,
+                                  value: value
+                                }));
+                              }
+                            } catch (e) {
+                              console.error("Error parsing PII data:", e);
+                              // If parsing fails, try to display as-is
+                              piiFields = [{ name: "Raw Data", value: selectedPiiItem.PII }];
+                            }
+                          } else {
+                            // Last resort: display all properties that might contain PII
+                            const excludedKeys = ['id', '_id', 'category', 'Category', 'type', 'Type', 
+                                                  'lastUpdated', 'updated_at', 'created_at', 'createdBy',
+                                                  'created_by', 'securityLevel', 'piiData', 'PII'];
+                            
+                            piiFields = Object.entries(selectedPiiItem)
+                              .filter(([key]) => !excludedKeys.includes(key))
+                              .map(([key, value]) => ({
+                                name: key,
+                                value: typeof value === 'object' ? JSON.stringify(value) : value
+                              }));
+                          }
+                          
+                          return piiFields.length > 0 ? (
+                            piiFields.map((field, index) => (
+                              <div key={index} className="p-4 rounded-lg" style={{ backgroundColor: 'rgba(59, 130, 246, 0.1)' }}>
+                                <h4 className="text-sm font-medium mb-1 opacity-70">{field.name}</h4>
+                                <p className="font-mono bg-black bg-opacity-20 p-2 rounded">
+                                  {typeof field.value === 'object' ? JSON.stringify(field.value) : field.value}
+                                </p>
+                              </div>
+                            ))
+                          ) : (
+                            <p className="italic opacity-60">No PII data fields available</p>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                    
+                    <div className="border-t pt-6 flex justify-end space-x-3" style={{ borderColor: colors.border }}>
+                      <button 
+                        className="px-4 py-2 border rounded-lg text-sm"
+                        style={{ borderColor: colors.border }}
+                        onClick={() => setSelectedPiiItem(null)}
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
           ) : (
             <>
               {/* Welcome Header */}
@@ -294,7 +607,7 @@ const GuardDashboard = () => {
           )}
           
           {/* Stats Cards */}
-          {activePage !== 'calendar' && (
+          {activePage !== 'calendar' && activePage !== 'pii-data' && (
             <>
               <div className="grid grid-cols-4 gap-6 mb-6">
                 <div className="rounded-xl p-4 flex flex-col" style={{ backgroundColor: colors.card, border: `1px solid ${colors.border}` }}>
@@ -345,7 +658,7 @@ const GuardDashboard = () => {
               {/* Data Table */}
             </>
           )}
-          {activePage !== 'calendar' && (
+          {activePage !== 'calendar' && activePage !== 'pii-data' && (
             <>
               <div className="rounded-xl overflow-hidden mb-6" style={{ backgroundColor: colors.card, border: `1px solid ${colors.border}` }}>
                 <div className="p-4 border-b" style={{ borderColor: colors.border }}>

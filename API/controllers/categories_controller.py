@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from api.auth.middleware import auth_required
 from api.data.database import DatabaseHandler
+import os
 
 # Configure logging
 logger = logging.getLogger("api.controllers.categories")
@@ -20,8 +21,13 @@ logger.setLevel(logging.INFO)
 # Create router
 router = APIRouter(prefix="/categories", tags=["Categories"])
 
-# Create database handler
-db_handler = DatabaseHandler()
+# Import mock handler if defined in PII controller to share the same mock DB
+if os.environ.get("USE_MOCK_DB", "true").lower() == "true":
+    # Share the mock database with PII controller
+    from api.controllers.pii_enhanced_controller import db_handler
+else:
+    # Use real database handler for production
+    db_handler = DatabaseHandler()
 
 class CategoryResponse(BaseModel):
     """Category response model for UI."""
@@ -153,7 +159,8 @@ async def get_items_by_category(
         end_idx = start_idx + limit
         paginated_items = filtered_items[start_idx:end_idx]
         
-        # Decrypt and transform items
+        # Decrypt and transform items (similar to get_all_pii_data)
+        # [Similar transformation code as in the PII controller]
         transformed_items = []
         for item in paginated_items:
             # Decrypt the item
@@ -262,63 +269,6 @@ async def get_items_by_category(
     except Exception as e:
         # Log and convert other exceptions to HTTP exceptions
         logger.error(f"Error getting items by category: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail="Internal server error"
-        )
-
-@router.post("/{category_name}", response_model=Dict[str, Any])
-async def create_category(
-    request: Request,
-    category_name: str,
-    user_info: Dict[str, Any] = Depends(auth_required)
-):
-    """
-    Create a new category.
-    
-    This endpoint is for creating new data categories in the system.
-    """
-    try:
-        # Get client IP for audit logging
-        client_ip = request.client.host if request.client else "unknown"
-        
-        # Log the request
-        logger.info(f"Creating category {category_name} for user: {user_info.get('sub')} from {client_ip}")
-        
-        # In a real implementation, you would store this in a database
-        # For this example, we'll just return success
-        
-        # Define standard category colors and icons
-        category_metadata = {
-            "Financial": {"color": "#3B82F6", "icon": "💳"},
-            "Personal": {"color": "#F59E0B", "icon": "👤"},
-            "Medical": {"color": "#EF4444", "icon": "🏥"},
-            "Accounts": {"color": "#10B981", "icon": "🔑"},
-            "Documents": {"color": "#8B5CF6", "icon": "📄"},
-            "Uncategorized": {"color": "#6B7280", "icon": "📁"}
-        }
-        
-        # Get or assign default metadata
-        metadata = category_metadata.get(category_name, {"color": "#6B7280", "icon": "📁"})
-        
-        # Return the new category
-        return {
-            "success": True,
-            "category": {
-                "id": 999,  # This would be assigned by the database in a real implementation
-                "name": category_name,
-                "count": 0,
-                "color": metadata["color"],
-                "icon": metadata["icon"]
-            }
-        }
-            
-    except HTTPException:
-        # Re-raise HTTP exceptions
-        raise
-    except Exception as e:
-        # Log and convert other exceptions to HTTP exceptions
-        logger.error(f"Error creating category: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
             detail="Internal server error"
