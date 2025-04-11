@@ -7,7 +7,7 @@ from cryptography.fernet import Fernet, InvalidToken
 
 import boto3
 from botocore.exceptions import ClientError
-
+from CONSTANTS import ENCRYPTION_KEY as encrypted_key
 # Configure logging
 logger = logging.getLogger("api.encryption.kms")
 logger.setLevel(logging.INFO)
@@ -145,7 +145,7 @@ class KMSHandler:
         """
         Decrypt PII data from a base64-encoded string.
         """
-        stored_encrypted_key_b64 = 'AQIDAHj0TmZUeMFGmWfaDx5IU/raOdWcUBZ2E79MnrqrKquUvgHHDyhwaKtUgNfVU5PeSdL8AAAAfjB8BgkqhkiG9w0BBwagbzBtAgEAMGgGCSqGSIb3DQEHATAeBglghkgBZQMEAS4wEQQMqrsjr90JvHqJHWmbAgEQgDvDsxrGr8f7SNcNNylMprXhWWw/V0zdez5GrRtph1S7iWn0pd0sXYzsMiMe1YwsH3hKBR3d67YsMDkX0w=='
+        stored_encrypted_key_b64 = encrypted_key
         if not self.initialize_from_secret(stored_encrypted_key_b64):
             logger.error("Initialization failed.")
         else:
