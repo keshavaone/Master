@@ -21,7 +21,7 @@ load_dotenv()
 from fastapi import FastAPI, Request, status, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from api.auth import auth_router, init_auth_system
 from api.controllers.pii_enhanced_controller import router as pii_router
@@ -31,15 +31,53 @@ from api.controllers.activity_controller import router as activity_router
 from api.controllers.auth_enhanced_controller import router as auth_enhanced_router
 from api.controllers.calendar_controller import router as calendar_router
 from api.encryption import get_kms_handler
+from api.auth.security_enhancements import get_secure_headers, apply_rate_limit
 
 # Configure logging
-handler = RotatingFileHandler(
-    'application.log', maxBytes=1000000, backupCount=3)
-logging.basicConfig(handlers=[handler], level=logging.INFO)
+import os
+import json
+from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
+
+# Ensure logs directory exists
+log_dir = 'logs'
+os.makedirs(log_dir, exist_ok=True)
+
+# Configure rotating file handler
+file_handler = RotatingFileHandler(
+    os.path.join(log_dir, 'application.log'), 
+    maxBytes=10485760,  # 10MB
+    backupCount=10
+)
+
+# Add timed rotating handler for daily logs
+daily_handler = TimedRotatingFileHandler(
+    os.path.join(log_dir, 'daily.log'),
+    when='midnight',
+    interval=1,
+    backupCount=30
+)
+
+# Configure log format
+log_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(log_format)
+daily_handler.setFormatter(log_format)
+
+# Configure root logger
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[file_handler, daily_handler]
+)
 logger = logging.getLogger("api")
 
-# Request counter
+# Request counter and metrics
 counter_calls = Counter()
+api_metrics = {
+    "response_times": [],
+    "error_count": 0,
+    "request_count": 0,
+    "avg_response_time": 0.0
+}
 
 # Define lifespan event handler
 @asynccontextmanager
@@ -109,6 +147,9 @@ app.add_middleware(
     expose_headers=["X-Total-Count", "X-Page", "X-Per-Page", "X-Total-Pages"]
 )
 
+# Add GZip compression for responses
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
 # Middleware to add pagination headers
 @app.middleware("http")
 async def add_pagination_headers(request: Request, call_next):
@@ -130,6 +171,25 @@ async def add_pagination_headers(request: Request, call_next):
         
     return response
 
+# Add security headers middleware
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """
+    Add security headers to all responses
+    """
+    # First apply rate limiting - this will raise an exception if rate limit is exceeded
+    await apply_rate_limit(request)
+    
+    # Process the request
+    response = await call_next(request)
+    
+    # Add security headers
+    security_headers = get_secure_headers()
+    for header_name, header_value in security_headers.items():
+        response.headers[header_name] = header_value
+    
+    return response
+
 # Add request counting middleware
 @app.middleware("http")
 async def count_api_calls(request: Request, call_next):
@@ -149,9 +209,22 @@ async def count_api_calls(request: Request, call_next):
         # Process the request normally
         response = await call_next(request)
         
-        # Log request metrics
+        # Log and track request metrics
         process_time = time.time() - start_time
         counter_calls["totalCalls"] += 1
+        api_metrics["request_count"] += 1
+        api_metrics["response_times"].append(process_time)
+        
+        # Keep only last 1000 response times in memory
+        if len(api_metrics["response_times"]) > 1000:
+            api_metrics["response_times"] = api_metrics["response_times"][-1000:]
+        
+        # Calculate average response time
+        api_metrics["avg_response_time"] = sum(api_metrics["response_times"]) / len(api_metrics["response_times"])
+        
+        # Add response time header
+        response.headers["X-Process-Time"] = str(process_time)
+        
         logger.info(
             f"Request #{counter_calls['totalCalls']} - {request.method} {request.url.path} "
             f"| Status: {response.status_code} | Time: {process_time:.3f}s"
@@ -161,6 +234,13 @@ async def count_api_calls(request: Request, call_next):
     except Exception as e:
         # Handle any uncaught exceptions
         process_time = time.time() - start_time
+        api_metrics["error_count"] += 1
+        
+        # Add response time to metrics
+        api_metrics["response_times"].append(process_time)
+        if len(api_metrics["response_times"]) > 1000:
+            api_metrics["response_times"] = api_metrics["response_times"][-1000:]
+            
         logger.error(
             f"Unhandled exception in {request.method} {request.url.path}: {str(e)} "
             f"| Time: {process_time:.3f}s"
@@ -176,10 +256,21 @@ async def count_api_calls(request: Request, call_next):
 @app.get("/")
 async def root():
     """Root endpoint."""
+    # Get basic system metrics
+    avg_response_time = api_metrics["avg_response_time"]
+    total_requests = api_metrics["request_count"]
+    error_count = api_metrics["error_count"]
+    
     return {
         "details": {
             "api_version": os.environ.get("API_VERSION", "1.0.0"),
-            "environment": os.environ.get("ENVIRONMENT", "development")
+            "environment": os.environ.get("ENVIRONMENT", "development"),
+            "system_status": "healthy",
+            "metrics": {
+                "total_requests": total_requests,
+                "error_count": error_count,
+                "avg_response_time": f"{avg_response_time:.3f}s"
+            }
         },
         "title": app.title,
         "version": app.version,

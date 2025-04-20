@@ -8,7 +8,13 @@ credentials management, session handling, and API authentication into a single s
 import time
 import logging
 import requests
-from typing import Dict, Any, Tuple
+import webbrowser
+import subprocess
+import platform
+import os
+import threading
+import json
+from typing import Dict, Any, Tuple, Optional, Union, Callable
 from datetime import datetime
 
 import api.CONSTANTS as CONSTANTS
@@ -65,6 +71,169 @@ class AuthenticationService:
             
         return True
     
+    def start_aws_sso_login(self, callback: Optional[Callable[[bool, str], None]] = None) -> Tuple[bool, str]:
+        """
+        Start the AWS SSO login process by opening the login URL in a browser.
+        
+        Args:
+            callback: Optional callback function to call when login is complete
+            
+        Returns:
+            Tuple[bool, str]: (Success flag, message)
+        """
+        try:
+            # Create session directory if needed
+            session_dir = CONSTANTS.AWS_SSO_CONFIG_DIR
+            if not os.path.exists(session_dir):
+                os.makedirs(session_dir)
+                self.logger.info(f"Created AWS SSO session directory: {session_dir}")
+            
+            # Prepare login URL
+            login_url = CONSTANTS.AWS_LOGIN_URL
+            self.logger.info(f"Opening AWS SSO login URL: {login_url}")
+            
+            # Start browser process
+            try:
+                webbrowser.open(login_url)
+                self.logger.info("Opened AWS SSO login URL in browser")
+                
+                # Start a thread to monitor for SSO completion
+                if callback:
+                    threading.Thread(
+                        target=self._monitor_sso_completion,
+                        args=(callback,),
+                        daemon=True
+                    ).start()
+                
+                return True, "AWS SSO login started. Please authenticate in your browser."
+            except Exception as e:
+                error_msg = f"Failed to open browser: {str(e)}"
+                self.logger.error(error_msg)
+                return False, f"{error_msg}. Please manually visit {login_url}"
+                
+        except Exception as e:
+            error_msg = f"Error starting AWS SSO login: {str(e)}"
+            self.logger.error(error_msg)
+            return False, error_msg
+    
+    def _monitor_sso_completion(self, callback: Callable[[bool, str], None]) -> None:
+        """
+        Monitor for AWS SSO login completion.
+        
+        Args:
+            callback: Callback function to call when login is complete
+        """
+        try:
+            # In a real implementation, this would use a local web server or other mechanism
+            # to receive the callback from AWS SSO after the browser login completes.
+            # For simplicity, we'll just poll the session directory for a credentials file.
+            
+            # This is a simplified implementation - in a real app, you would use proper
+            # OAuth 2.0 flow with redirect URIs and state parameters.
+            
+            credentials_file = os.path.join(CONSTANTS.AWS_SSO_CONFIG_DIR, "sso_credentials.json")
+            max_wait_time = 300  # 5 minutes
+            poll_interval = 3  # 3 seconds
+            elapsed_time = 0
+            
+            self.logger.info("Monitoring for AWS SSO login completion...")
+            
+            while elapsed_time < max_wait_time:
+                if os.path.exists(credentials_file):
+                    try:
+                        with open(credentials_file, "r") as f:
+                            credentials = json.load(f)
+                            
+                        if self._complete_aws_sso_login(credentials):
+                            callback(True, "AWS SSO authentication successful")
+                            return
+                    except Exception as e:
+                        self.logger.error(f"Error reading credentials file: {e}")
+                
+                # Sleep and increment elapsed time
+                time.sleep(poll_interval)
+                elapsed_time += poll_interval
+            
+            # Timeout
+            self.logger.warning("AWS SSO login timed out")
+            callback(False, "AWS SSO login timed out. Please try again.")
+            
+        except Exception as e:
+            self.logger.error(f"Error monitoring SSO completion: {e}")
+            callback(False, f"Error during AWS SSO login: {str(e)}")
+    
+    def _complete_aws_sso_login(self, credentials: Dict[str, Any]) -> bool:
+        """
+        Complete the AWS SSO login process with the obtained credentials.
+        
+        Args:
+            credentials: AWS credentials
+            
+        Returns:
+            bool: True if login completed successfully
+        """
+        try:
+            # Extract credentials
+            access_key = credentials.get('access_key') or credentials.get('AccessKeyId')
+            secret_key = credentials.get('secret_key') or credentials.get('SecretAccessKey')
+            session_token = credentials.get('session_token') or credentials.get('SessionToken')
+            
+            if not (access_key and secret_key):
+                self.logger.error("Incomplete credentials for AWS SSO")
+                return False
+            
+            # Set credentials in headers for API authentication
+            headers = {
+                "X-AWS-Access-Key-ID": access_key,
+                "X-AWS-Secret-Access-Key": secret_key
+            }
+            
+            if session_token:
+                headers["X-AWS-Session-Token"] = session_token
+            
+            # Authenticate with the API
+            self.logger.info(f"Authenticating with AWS SSO credentials to {self.api_base_url}")
+            try:
+                response = requests.post(
+                    f"{self.api_base_url}/auth/aws-sso",
+                    headers=headers,
+                    timeout=30
+                )
+            except requests.RequestException as e:
+                self.logger.error(f"API connection error: {str(e)}")
+                return False
+            
+            if response.status_code != 200:
+                self.logger.error(f"AWS SSO authentication failed: Status {response.status_code}")
+                return False
+            
+            # Parse the response
+            try:
+                token_data = response.json()
+            except ValueError:
+                self.logger.error("Invalid JSON response from server")
+                return False
+                
+            self.token = token_data.get("access_token")
+            if not self.token:
+                self.logger.error("No token returned from server")
+                return False
+                
+            self.token_type = token_data.get("token_type", "bearer")
+            self.user_id = token_data.get("user_id")
+            self.auth_type = "aws_sso"
+            
+            # Calculate token expiration
+            expires_in = token_data.get("expires_in", 3600)  # Default to 1 hour
+            self.token_expires_at = time.time() + expires_in
+            
+            self.logger.info(f"Authenticated user {self.user_id} with AWS SSO")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error completing AWS SSO login: {str(e)}")
+            return False
+    
     def authenticate_with_aws_sso(self) -> Tuple[bool, str]:
         """
         Authenticate using AWS SSO credentials.
@@ -74,9 +243,8 @@ class AuthenticationService:
         """
         try:
             if not self.session_manager:
-                error_msg = "No session manager available for AWS SSO authentication"
-                self.logger.error(error_msg)
-                return False, error_msg
+                # Try the new SSO login flow
+                return self.start_aws_sso_login()
                 
             if not self.session_manager.is_authenticated:
                 error_msg = "No active AWS SSO session"
@@ -182,13 +350,34 @@ class AuthenticationService:
             return False
         
         try:
-            # For AWS SSO, we need to re-authenticate using session manager
-            if self.auth_type == "aws_sso" and self.session_manager and self.session_manager.is_authenticated:
+            # For AWS SSO, we need to re-authenticate using session manager or SSO login
+            if self.auth_type == "aws_sso":
                 self.logger.info("Refreshing AWS SSO token")
-                success, _ = self.authenticate_with_aws_sso()
-                return success
+                
+                # First try with session manager if available
+                if self.session_manager and self.session_manager.is_authenticated:
+                    success, _ = self.authenticate_with_aws_sso()
+                    if success:
+                        return True
+                
+                # If session manager refresh failed, check for cached credentials
+                credentials_file = os.path.join(CONSTANTS.AWS_SSO_CONFIG_DIR, "sso_credentials.json")
+                if os.path.exists(credentials_file):
+                    try:
+                        with open(credentials_file, "r") as f:
+                            credentials = json.load(f)
+                        
+                        if self._complete_aws_sso_login(credentials):
+                            self.logger.info("Refreshed token using cached SSO credentials")
+                            return True
+                    except Exception as e:
+                        self.logger.error(f"Error reading cached credentials: {e}")
+                
+                # If all refresh attempts failed, prompt for new login
+                self.logger.warning("Could not refresh token automatically, need new SSO login")
+                return False
             else:
-                self.logger.error("Cannot refresh token: No active AWS SSO session or unsupported auth type")
+                self.logger.error("Cannot refresh token: Unsupported auth type")
                 return False
                 
         except Exception as e:

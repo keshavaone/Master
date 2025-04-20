@@ -23,6 +23,13 @@ from api.encryption import get_kms_handler
 logger = logging.getLogger("api.data.database")
 logger.setLevel(logging.DEBUG)
 
+# Set up caching to improve performance
+from functools import lru_cache
+import hashlib
+
+# Cache for decrypt_item function (limited to last 100 items)
+_decrypt_cache = {}
+
 class DatabaseHandler:
     """
     Database handler for DynamoDB.
@@ -370,6 +377,24 @@ class DatabaseHandler:
             Tuple[bool, Union[Dict, str]]: Success flag and decrypted item or error message
         """
         try:
+            # Check if item is already cached
+            item_id = item.get('_id', '')
+            if item_id:
+                # Generate cache key from item ID and last modified timestamp if available
+                last_modified = item.get('updated_at') or item.get('created_at') or ''
+                cache_key = f"{item_id}:{last_modified}"
+                
+                # Check if result is in cache
+                if cache_key in _decrypt_cache:
+                    self.logger.debug(f"Cache hit for item: {item_id}")
+                    return True, _decrypt_cache[cache_key]
+                    
+                # Clean cache if it grows too large (keep most recent 100 items)
+                if len(_decrypt_cache) > 100:
+                    # Remove oldest 20 items
+                    remove_keys = list(_decrypt_cache.keys())[:20]
+                    for k in remove_keys:
+                        del _decrypt_cache[k]
             # Clone the item to avoid modifying the original
             decrypted_item = item.copy()
             
@@ -404,12 +429,11 @@ class DatabaseHandler:
                 # Return the item as is if we can't find a PII field
                 return True, decrypted_item
             
-            print(f"Using PII field: {pii_field}")
+            self.logger.debug(f"Using PII field: {pii_field}")
             
             # Get the encrypted PII data
             encrypted_pii = decrypted_item[pii_field]
-            print(f"Raw PII data type: {type(encrypted_pii)}")
-            print(f"Raw PII data preview: {str(encrypted_pii)[:100]}")
+            self.logger.debug(f"Raw PII data type: {type(encrypted_pii)}")
             
             # Handle DynamoDB native format (like {'S': 'value'})
             if isinstance(encrypted_pii, dict):
@@ -868,8 +892,8 @@ class DatabaseHandler:
                 
                 # Check if decryption was successful
                 if decrypted_pii:
-                    print(f"Successfully decrypted PII data")
-                    print(f"Decrypted data sample: {decrypted_pii[:100]}...")
+                    self.logger.debug(f"Successfully decrypted PII data")
+                    self.logger.debug(f"Decrypted data sample: {decrypted_pii[:50]}...")
                     
                     # Try to parse decrypted data as JSON if it looks like JSON
                     try:
@@ -912,6 +936,14 @@ class DatabaseHandler:
                         except:
                             # Keep the original data if all decryption and decoding fails
                             pass
+                
+            # Cache the result before returning
+            item_id = decrypted_item.get('_id', '')
+            if item_id:
+                last_modified = decrypted_item.get('updated_at') or decrypted_item.get('created_at') or ''
+                cache_key = f"{item_id}:{last_modified}"
+                _decrypt_cache[cache_key] = decrypted_item
+                self.logger.debug(f"Cached decrypted item: {item_id}")
                 
             # Log success
             self.logger.info(f"Processed PII data for item: {decrypted_item.get('_id', 'unknown')}")

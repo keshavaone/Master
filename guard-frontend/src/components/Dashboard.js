@@ -2,11 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { Shield, Eye, User, Lock, Database, FileText, Settings, LogOut, BarChart2, Bell, Search, Plus, RefreshCw, Calendar, Key } from 'lucide-react';
 import CalendarNotifications from './CalendarNotifications';
 import { dataAPI } from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 // Main dashboard component
 const GuardDashboard = () => {
   const [, setAuthenticated] = useState(true);
   const [activePage, setActivePage] = useState('dashboard');
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const { logout } = useAuth();
+  const navigate = useNavigate();
   const [darkMode, setDarkMode] = useState(true);
   const [notifications] = useState(3);
   const [searchQuery, setSearchQuery] = useState('');
@@ -65,6 +70,46 @@ const GuardDashboard = () => {
   };
   
   const sessionPercentage = (sessionTime / (45 * 60)) * 100;
+  
+  // Logout handler function
+  const handleLogout = async () => {
+    try {
+      // Show confirmation dialog
+      setShowLogoutConfirm(true);
+    } catch (error) {
+      console.error("Error initiating logout:", error);
+    }
+  };
+  
+  // Confirm logout and perform actual logout
+  const confirmLogout = async () => {
+    try {
+      console.log("Logging out...");
+      // Call the logout function from AuthContext
+      await logout();
+      
+      // Clear any local state
+      setShowLogoutConfirm(false);
+      setAuthenticated(false);
+      setPiiData([]);
+      setSelectedPiiItem(null);
+      
+      // Log the user out on the client side immediately
+      console.log("Logout successful, redirecting to login");
+      
+      // Redirect to login page
+      navigate("/login");
+    } catch (error) {
+      console.error("Error during logout:", error);
+      setShowLogoutConfirm(false);
+      alert("There was a problem logging out. Please try again.");
+    }
+  };
+  
+  // Cancel logout
+  const cancelLogout = () => {
+    setShowLogoutConfirm(false);
+  };
   
   // Function to fetch PII data from AWS through API
   const fetchPiiData = async () => {
@@ -156,11 +201,39 @@ const GuardDashboard = () => {
     border: '#E2E8F0'
   };
 
+  // Logout confirmation modal JSX
+  const logoutConfirmationModal = (
+    <div className={`fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 transition-opacity ${showLogoutConfirm ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+      <div className="bg-gray-800 rounded-xl p-6 shadow-2xl max-w-md w-full mx-4 border border-gray-700">
+        <h3 className="text-xl font-bold text-white mb-2">Confirm Logout</h3>
+        <p className="text-gray-300 mb-6">
+          Are you sure you want to log out? This will end your current session and you'll need to authenticate again to access the application.
+        </p>
+        <div className="flex flex-col sm:flex-row sm:justify-end gap-3">
+          <button
+            onClick={cancelLogout}
+            className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={confirmLogout}
+            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg flex items-center justify-center"
+          >
+            <LogOut className="h-4 w-4 mr-2" />
+            Confirm Logout
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
-    <div 
-      className="flex h-screen w-full overflow-hidden" 
-      style={{ backgroundColor: colors.bg, color: colors.text }}
-    >
+    <>
+      <div 
+        className="flex h-screen w-full overflow-hidden" 
+        style={{ backgroundColor: colors.bg, color: colors.text }}
+      >
       {/* Sidebar Navigation */}
       <div 
         className="w-64 h-full flex flex-col"
@@ -281,7 +354,7 @@ const GuardDashboard = () => {
               </button>
               <button 
                 className="text-xs flex items-center bg-red-500 hover:bg-red-600 px-2 py-1 rounded"
-                onClick={() => setAuthenticated(false)}
+                onClick={handleLogout}
               >
                 <LogOut className="h-3 w-3 mr-1" /> Logout
               </button>
@@ -775,6 +848,9 @@ const GuardDashboard = () => {
         </main>
       </div>
     </div>
+      {/* Render the logout confirmation modal */}
+      {logoutConfirmationModal}
+    </>
   );
 };
 

@@ -77,6 +77,54 @@ export const authAPI = {
     });
   },
   
+  startSSOLogin: (redirectUrl) => {
+    const redirectTarget = redirectUrl || window.location.origin + '/auth-callback';
+    console.log("API client: Starting AWS SSO browser login flow with redirect:", redirectTarget);
+    
+    // Create the form data to send as application/x-www-form-urlencoded
+    const formData = new URLSearchParams();
+    formData.append('redirect_url', redirectTarget);
+    
+    // Send the request with the correct Content-Type
+    return axios.post(`${API_BASE_URL}/auth/aws-sso/start-login`, formData, {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      // Increase timeout for API call
+      timeout: 10000
+    })
+    .catch(error => {
+      console.warn("Error starting SSO login via API:", error);
+      
+      // Fallback response with direct URLs
+      return {
+        data: {
+          success: true,
+          message: "Using local fallback URLs for AWS SSO login",
+          login_url: "https://d-9067c603c9.awsapps.com/login",
+          alternative_url: "https://d-9067c603c9.awsapps.com",
+          direct_login_url: "https://d-9067c603c9.awsapps.com/start",
+          instructions: "After logging in through the browser, return to the application to complete authentication"
+        }
+      };
+    });
+  },
+  
+  completeSSOLogin: (ssoCode) => {
+    console.log("API client: Completing AWS SSO login with code");
+    
+    // Create the form data to send as application/x-www-form-urlencoded
+    const formData = new URLSearchParams();
+    formData.append('sso_code', ssoCode);
+    
+    // Send the request with the correct Content-Type
+    return axios.post(`${API_BASE_URL}/auth/aws-sso/complete-login`, formData, {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      }
+    });
+  },
+  
   loginWithPassword: (username, password) => {
     return axios.post(`${API_BASE_URL}/auth/login`, { username, password });
   },

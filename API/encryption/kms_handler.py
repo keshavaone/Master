@@ -7,7 +7,7 @@ from cryptography.fernet import Fernet, InvalidToken
 
 import boto3
 from botocore.exceptions import ClientError
-from CONSTANTS import ENCRYPTION_KEY as encrypted_key
+from api.CONSTANTS import ENCRYPTION_KEY as encrypted_key
 # Configure logging
 logger = logging.getLogger("api.encryption.kms")
 logger.setLevel(logging.INFO)
@@ -105,6 +105,50 @@ class KMSHandler:
         except Exception as e:
             self.logger.error(f"Error decoding or decrypting base64 data: {e}")
             return None
+            
+    def is_base64(self, data: str) -> bool:
+        """
+        Check if a string is base64 encoded.
+        """
+        if not isinstance(data, str):
+            return False
+            
+        try:
+            # Fix padding if needed
+            if len(data) % 4 != 0:
+                data = self._fix_base64_padding(data)
+            base64.b64decode(data)
+            return True
+        except Exception:
+            return False
+            
+    def encrypt_to_base64(self, data: str) -> Optional[str]:
+        """
+        Encrypt data and return as base64 string.
+        """
+        try:
+            if not self.cipher_suite:
+                self.logger.error("Cipher suite not initialized")
+                return None
+                
+            if isinstance(data, str):
+                data = data.encode('utf-8')
+                
+            encrypted_data = self.cipher_suite.encrypt(data)
+            return base64.b64encode(encrypted_data).decode('utf-8')
+        except Exception as e:
+            self.logger.error(f"Error encrypting data: {e}")
+            return None
+            
+    def get_encryption_context(self) -> dict:
+        """
+        Get the encryption context
+        """
+        return {
+            "initialized": self.initialized,
+            "key_id": self.key_id,
+            "region": self.region_name
+        }
 
     def decrypt(self, encrypted_data: bytes) -> Optional[bytes]:
         """

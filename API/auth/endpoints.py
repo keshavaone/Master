@@ -12,7 +12,11 @@ from fastapi import APIRouter, Header, Request, HTTPException, status, Depends, 
 from api.auth.jwt_handler import (
     verify_token, blacklist_token, blacklist_all_user_tokens, extract_user_id_from_token
 )
-from api.auth.aws_sso import authenticate_with_aws_credentials
+from api.auth.aws_sso import (
+    authenticate_with_aws_credentials, 
+    start_aws_sso_login,
+    complete_aws_sso_login
+)
 from api.auth.middleware import auth_required
 
 # Configure logging
@@ -44,6 +48,73 @@ async def auth_with_aws_sso(
         )
         
     return result.to_dict()
+
+@router.post("/aws-sso/start-login")
+async def start_sso_login(
+    request: Request,
+    redirect_url: Optional[str] = Body(None)
+):
+    """
+    Start the AWS SSO login process.
+    
+    This endpoint initiates the AWS SSO login flow by providing the login URL.
+    The browser will open automatically if possible.
+    
+    Args:
+        redirect_url: Optional URL to redirect to after SSO login
+    
+    Returns:
+        Dict: Login information with URL
+    """
+    try:
+        result = start_aws_sso_login(redirect_url)
+        logger.info(f"Started AWS SSO login process: {result.get('message')}")
+        
+        return result
+    except Exception as e:
+        logger.error(f"Error starting AWS SSO login: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to start SSO login process: {str(e)}"
+        )
+
+@router.post("/aws-sso/complete-login")
+async def complete_sso_login(
+    request: Request,
+    sso_code: str = Body(...)
+):
+    """
+    Complete the AWS SSO login process.
+    
+    This endpoint completes the AWS SSO login flow by validating the code
+    received from AWS SSO and returning auth tokens.
+    
+    Args:
+        sso_code: The code received from AWS SSO after authentication
+    
+    Returns:
+        Dict: Authentication result with tokens
+    """
+    try:
+        result = complete_aws_sso_login(sso_code)
+        
+        if not result.success:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=result.error,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+            
+        logger.info(f"Completed AWS SSO login for user: {result.user_id}")
+        return result.to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error completing AWS SSO login: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to complete SSO login: {str(e)}"
+        )
 
 
 @router.get("/user", response_model=Dict[str, Any])

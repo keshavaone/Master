@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
 import DataView from './components/DataView';
+import AuthCallback from './components/AuthCallback';
 
 // Protected route component
 const ProtectedRoute = ({ children }) => {
@@ -26,6 +27,7 @@ function App() {
       <Router>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/auth-callback" element={<AuthCallback />} />
           <Route path="/dashboard" element={
             <ProtectedRoute>
               <Dashboard />

@@ -19,6 +19,20 @@ import os
 logger = logging.getLogger("api.controllers.pii")
 logger.setLevel(logging.INFO)
 
+# Set up performance monitoring
+import time
+from functools import wraps
+
+def timing_decorator(func):
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = await func(*args, **kwargs)
+        end_time = time.time()
+        logger.info(f"Function {func.__name__} took {end_time - start_time:.4f} seconds")
+        return result
+    return wrapper
+
 # Create router
 router = APIRouter(prefix="/pii", tags=["PII Data"])
 
@@ -209,6 +223,7 @@ class PiiItemUpdate(BaseModel):
     piiData: Optional[List[Dict[str, str]]] = None
 
 @router.get("/", response_model=List[Dict[str, Any]])
+@timing_decorator
 async def get_all_pii_data(
     request: Request,
     page: int = Query(1, ge=1, description="Page number"),
@@ -595,6 +610,7 @@ async def get_all_pii_data(
         )
 
 @router.get("/{item_id}", response_model=Dict[str, Any])
+@timing_decorator
 async def get_pii_item(
     request: Request,
     item_id: str,
@@ -853,6 +869,7 @@ async def get_pii_item(
         )
 
 @router.post("/", status_code=status.HTTP_201_CREATED, response_model=Dict[str, Any])
+@timing_decorator
 async def create_pii_item(
     request: Request,
     item_data: PiiItemCreate,
